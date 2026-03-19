@@ -114,49 +114,55 @@ elif choice == "💸 Record Transaction":
         col1, col2 = st.columns(2)
         with col1:
             ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
-            amt = st.number_input("Amount (GHS)", min_value=1.0)
-        
+            
+            # 1. Input for Number of Marks (The multiplier)
+            num_marks = st.number_input("Number of Marks", min_value=1, step=1, value=1)
+            
+            # 2. Calculation: Number of Marks x Client's Daily Mark
+            calculated_amt = float(num_marks * d_mark)
+            
+            # Show the calculation clearly to the user
+            st.info(f"💰 Total: {calculated_amt:.2f} GHS ({num_marks} x {d_mark:.2f})")
+
         with col2:
             t_date = st.date_input("Transaction Date", value=datetime.now())
             is_old = st.checkbox("📍 Migration: This is an old deposit from paper book")
 
         if st.button("Confirm & Save"):
-        try:
-            # 1. THE 31-DAY & DATE LOGIC
-            p_day = t_date.day
-            m_year = t_date.strftime("%m/%Y")
-            
-            # 2. THE OLD DATA LOGIC
-            # If it's old data (is_old checked), we use the full amount. 
-            # Otherwise, we handle it as a normal deposit/withdrawal.
-            val = float(amt) if ttype == "Deposit" else -float(amt)
+            try:
+                p_day = t_date.day
+                m_year = t_date.strftime("%m/%Y")
+                
+                # Use the calculated amount (negative if it's a withdrawal)
+                final_val = calculated_amt if ttype == "Deposit" else -calculated_amt
 
-            # 3. DATABASE INSERTION
-            with conn.session as s:
-                s.execute(
-                    text("""
-                        INSERT INTO contributions (
-                            client_name, amount, date, month_year, passbook_day
-                        ) 
-                        VALUES (:n, :a, :d, :my, :pd)
-                    """),
-                    {
-                        "n": target,
-                        "a": val,
-                        "d": t_date.strftime('%Y-%m-%d'), # Formats date for backdating
-                        "my": m_year,
-                        "pd": int(p_day) # Ensures day is a standard number
-                    }
-                )
-                s.commit()
-            
-            st.success(f"✅ Recorded GHS {amt} for {target} on {m_year}")
-            st.balloons()
+                with conn.session as s:
+                    s.execute(
+                        text("""
+                            INSERT INTO contributions (
+                                client_name, amount, date, month_year, 
+                                passbook_day, marks_covered
+                            ) 
+                            VALUES (:n, :a, :d, :my, :pd, :mc)
+                        """),
+                        {
+                            "n": target,
+                            "a": final_val,
+                            "d": t_date.strftime('%Y-%m-%d'),
+                            "my": m_year,
+                            "pd": int(p_day),
+                            "mc": int(num_marks)
+                        }
+                    )
+                    s.commit()
+                
+                st.success(f"✅ Saved {num_marks} marks ({calculated_amt} GHS) for {target}")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Database Error: {e}")
             
         except Exception as e:
-            st.error(f"Failed to save: {e}")
-    else:
-        st.warning("Please register a client first.")
+        st.error(f"Failed to save: {e}")
 
 # --- PASSBOOK VIEW ---
 elif choice == "🔎 Digital Passbook":

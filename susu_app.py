@@ -107,33 +107,34 @@ elif choice == "💸 Record Transaction":
     st.title("💸 Transaction Entry")
     clients = conn.query("SELECT client_name, daily_mark FROM clients", ttl=0)
     
-    if not clients.empty:
+if not clients.empty:
+        # 1. SELECT CLIENT
         target = st.selectbox("Select Client", clients['client_name'].tolist())
         d_mark = clients[clients['client_name'] == target]['daily_mark'].values[0]
+
+        col1, col2 = st.columns(2)
         
-col1, col2 = st.columns(2)
         with col1:
             ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
             
-            # 1. Input for Number of Marks (The multiplier)
-            num_marks = st.number_input("Number of Marks", min_value=1, step=1, value=1)
+            # This is your new multiplier logic
+            num_marks = st.number_input("Number of Marks (Daily Multiples)", min_value=1, step=1, value=1)
             
-            # 2. Calculation: Number of Marks x Client's Daily Mark
+            # The calculation: e.g., 20 x 5 = 100
             calculated_amt = float(num_marks * d_mark)
             
-            # Show the calculation clearly to the user
             st.info(f"💰 Total: {calculated_amt:.2f} GHS ({num_marks} x {d_mark:.2f})")
 
         with col2:
             t_date = st.date_input("Transaction Date", value=datetime.now())
-            is_old = st.checkbox("📍 Migration: This is an old deposit from paper book")
+            is_old = st.checkbox("📍 Migration: Old deposit from paper book")
 
         if st.button("Confirm & Save"):
             try:
                 p_day = t_date.day
                 m_year = t_date.strftime("%m/%Y")
                 
-                # Use the calculated amount (negative if it's a withdrawal)
+                # Make it negative if it's a withdrawal
                 final_val = calculated_amt if ttype == "Deposit" else -calculated_amt
 
                 with conn.session as s:
@@ -159,7 +160,7 @@ col1, col2 = st.columns(2)
                 st.success(f"✅ Saved {num_marks} marks ({calculated_amt} GHS) for {target}")
                 st.balloons()
             except Exception as e:
-                st.error(f"Database Error: {e}")
+                st.error(f"Error: {e}")
 
 # --- PASSBOOK VIEW ---
 elif choice == "🔎 Digital Passbook":

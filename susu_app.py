@@ -158,10 +158,8 @@ elif choice == "💸 Record Transaction":
                 
                 st.success(f"✅ Saved {num_marks} marks ({calculated_amt} GHS) for {target}")
                 st.balloons()
-            except Exception as e:
-                st.error(f"Database Error: {e}")
             
-        except Exception as e:
+                except Exception as e:
         st.error(f"Failed to save: {e}")
 
 # --- PASSBOOK VIEW ---

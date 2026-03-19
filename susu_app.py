@@ -111,7 +111,7 @@ elif choice == "💸 Record Transaction":
         target = st.selectbox("Select Client", clients['client_name'].tolist())
         d_mark = clients[clients['client_name'] == target]['daily_mark'].values[0]
         
-        col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
         with col1:
             ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
             
@@ -158,9 +158,8 @@ elif choice == "💸 Record Transaction":
                 
                 st.success(f"✅ Saved {num_marks} marks ({calculated_amt} GHS) for {target}")
                 st.balloons()
-            
-                except Exception as e:
-        st.error(f"Failed to save: {e}")
+            except Exception as e:
+                st.error(f"Database Error: {e}")
 
 # --- PASSBOOK VIEW ---
 elif choice == "🔎 Digital Passbook":

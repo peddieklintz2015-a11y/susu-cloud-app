@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 local_conn = sqlite3.connect('susu.db')
 
 # 2. Connect to your CLOUD Supabase (Paste your URI here)
-cloud_url = "postgresql://postgres:Rh1AeSxgC06AI1p5@db.xrqcejmtqfrztfwggsbc.supabase.co:5432/postgres"
+cloud_url = os.getenv("SUPABASE_URL")
 engine = create_engine(cloud_url)
 
 # 3. Move 'clients' table

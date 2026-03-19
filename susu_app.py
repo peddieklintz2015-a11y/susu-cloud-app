@@ -90,7 +90,7 @@ elif choice == "👤 Register New Client":
     with st.form("registration"):
         name = st.text_input("Full Name")
         phone = st.text_input("Phone Number")
-        daily = st.number_input("Daily Contribution Amount (GHS)", min_value=1.0)
+        daily = st.number_input("Daily Contribution Amount (GHS)", min_value=5.0, step =1.0,format="%.2f")
         submit = st.form_submit_button("Register to Cloud")
         
         if submit and name:
@@ -104,26 +104,22 @@ elif choice == "👤 Register New Client":
 
 # --- TRANSACTIONS (WITH 31-DAY & OLD DATA LOGIC) ---
 elif choice == "💸 Record Transaction":
-    st.title("💸 Transaction Entry")
-    clients = conn.query("SELECT client_name, daily_mark FROM clients", ttl=0)
-    
-if not clients.empty:
-        # 1. SELECT CLIENT
-        target = st.selectbox("Select Client", clients['client_name'].tolist())
-        d_mark = clients[clients['client_name'] == target]['daily_mark'].values[0]
+        st.title("💸 Transaction Entry")
 
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
+        # 1. Download the client list
+        clients = conn.query("SELECT client_name, daily_mark FROM clients", ttl=0)
+
+        # 2. Check the list
+        if not clients.empty:
+            target = st.selectbox("Select Client", clients['client_name'].tolist())
+            d_mark = clients[clients['client_name'] == target]['daily_mark'].iloc[0]
             
-            # This is your new multiplier logic
-            num_marks = st.number_input("Number of Marks (Daily Multiples)", min_value=1, step=1, value=1)
-            
-            # The calculation: e.g., 20 x 5 = 100
-            calculated_amt = float(num_marks * d_mark)
-            
-            st.info(f"💰 Total: {calculated_amt:.2f} GHS ({num_marks} x {d_mark:.2f})")
+            col1, col2 = st.columns(2)
+            with col1:
+                ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
+                num_marks = st.number_input("Number of Marks", min_value=1, step=1)
+                calculated_amt = float(num_marks * d_mark)
+                st.info(f"💰 Total: {calculated_amt:.2f} GHS")
 
         with col2:
             t_date = st.date_input("Transaction Date", value=datetime.now())

@@ -3,9 +3,33 @@ import pandas as pd
 from sqlalchemy import text
 from datetime import datetime
 
+# --- 1. SECURITY GATE (MUST BE FIRST) ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
+        
+        # Wrapping in a form makes the "Enter" key work
+        with st.form("login_form"):
+            pwd = st.text_input("Admin Password", type="password")
+            submit_button = st.form_submit_button("Log In")
+            
+            if submit_button:
+                if pwd == st.secrets["password"]:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid Password")
+        return False
+    return True
+
+# Stop the app here if not logged in
+if not check_password():
+    st.stop()
+
 # --- 1. INITIALIZE CLOUD CONNECTION ---
 # This connects to your Supabase via the secrets you set up
-conn = st.connection("postgresql", type="sql")
+conn = st.connection("postgresql",
+type="sql")
 
 # --- 2. SECURITY GATE ---
 def check_password():

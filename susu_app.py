@@ -89,7 +89,10 @@ choice = st.sidebar.radio("Go To:", [
     "🗑️ Admin Tools"
 ])
 # --- 5. MODULES ---
-
+# --- MAIN APP LOGIC ---
+if 'conn' in locals():
+    # MOVE THIS HERE: Download clients once so ALL pages can see them
+    clients = conn.query("SELECT * FROM clients", ttl=0)
 # --- DASHBOARD ---
 if choice == "📊 Business Dashboard":
     st.title("📊 Financial Overview")

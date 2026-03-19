@@ -167,37 +167,52 @@ elif choice == "💸 Record Transaction":
                 st.error(f"Error: {e}")
 
 # --- PASSBOOK VIEW ---
-elif choice == "🔎 Digital Passbook":
-    st.title("🔎 Digital Passbook Search")
-    profile = conn.query(f"SELECT * FROM clients WHERE client_name = '{target}'", ttl=0)
+elif choice == "📋 Digital Passbook":
+        st.title("📋 Digital Passbook")
         
-    if not profile.empty:
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                image_url = profile['photo_url'].iloc[0]
-                if image_url:
-                    st.image(image_url, width=150, caption=f"ID: {profile['client_id'].iloc[0]}")
+        # 1. Load clients for the search box
+        clients = conn.query("SELECT * FROM clients", ttl=0)
+        
+        if not clients.empty:
+            target = st.selectbox("Search Client Name", clients['client_name'].tolist())
+            
+            # 2. Get the specific client's details (Photo, ID, etc.)
+            client_profile = clients[clients['client_name'] == target].iloc[0]
+            
+            # --- DISPLAY PROFILE ---
+            col_a, col_b = st.columns([1, 2])
+            with col_a:
+                if client_profile['photo_url']:
+                    st.image(client_profile['photo_url'], width=150)
                 else:
-                    st.warning("No photo available.")
-            with c2:
-                st.write(f"*Full Name:* {profile['client_name'].iloc[0]}")
-                st.write(f"*ID:* {profile['client_id'].iloc[0]}")
-                st.write(f"*Daily Mark:* GHS {profile['daily_mark'].iloc[0]}")
+                    st.warning("No Photo")
+            with col_b:
+                st.subheader(target)
+                st.write(f"🆔 *ID:* {client_profile['client_id']}")
+                st.write(f"📞 *Phone:* {client_profile['phone']}")
+                st.write(f"💰 *Daily Mark:* {client_profile['daily_mark']:.2f} GHS")
 
-# Filter data for just this client
-client_history = conn.query(f"SELECT date, amount, marks_covered FROM contributions WHERE client_name = '{target}'", ttl=0)
+            st.divider()
 
-if not client_history.empty:
-    st.table(client_history) # Shows a clean list
-    
-    # Simple Download for the Client
-    client_csv = client_history.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label=f"📄 Download {target}'s Statement",
-        data=client_csv,
-        file_name=f"{target}_statement.csv",
-        mime='text/csv',
-    )
+            # 3. Fetch Transaction History
+            history = conn.query(f"SELECT date, amount, marks_covered FROM contributions WHERE client_name = '{target}' ORDER BY date DESC", ttl=0)
+            
+            if not history.empty:
+                st.write("### Recent Contributions")
+                st.dataframe(history, use_container_width=True)
+                
+                # --- INDIVIDUAL STATEMENT DOWNLOAD ---
+                csv_data = history.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"📄 Download {target}'s Statement",
+                    data=csv_data,
+                    file_name=f"{target}Statement{datetime.now().strftime('%Y-%m')}.csv",
+                    mime='text/csv',
+                )
+            else:
+                st.info("No transaction history found for this client.")
+        else:
+            st.error("No clients found. Please register a client in Admin Tools first.")
 
 # --- ADMIN / REGISTER & DELETE CLIENT --- #
 elif choice == "🛠 Admin Tools":

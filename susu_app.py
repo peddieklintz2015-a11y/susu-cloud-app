@@ -121,27 +121,40 @@ elif choice == "💸 Record Transaction":
             is_old = st.checkbox("📍 Migration: This is an old deposit from paper book")
 
         if st.button("Confirm & Save"):
-            # The 31-Day Logic
+        try:
+            # 1. THE 31-DAY & DATE LOGIC
             p_day = t_date.day
             m_year = t_date.strftime("%m/%Y")
-            val = amt if ttype == "Deposit" else -amt
             
-            # If it's old data, don't charge the fee again
-            fee = 0.0 if (is_old or ttype == "Withdrawal") else d_mark
-            marks = (val - fee) / d_mark if d_mark != 0 else 0
-            
+            # 2. THE OLD DATA LOGIC
+            # If it's old data (is_old checked), we use the full amount. 
+            # Otherwise, we handle it as a normal deposit/withdrawal.
+            val = float(amt) if ttype == "Deposit" else -float(amt)
+
+            # 3. DATABASE INSERTION
             with conn.session as s:
                 s.execute(
-                    text("""INSERT INTO contributions 
-                         (client_name, amount, fee, marks_covered, date, month_year, passbook_day) 
-                         VALUES (:n, :a, :f, :m, :d, :my, :pd)"""),
-                    params={
-                        "n": target, "a": val, "f": fee, "m": marks,
-                        "d": t_date.strftime("%Y-%m-%d"), "my": m_year, "pd": p_day
+                    text("""
+                        INSERT INTO contributions (
+                            client_name, amount, date, month_year, passbook_day
+                        ) 
+                        VALUES (:n, :a, :d, :my, :pd)
+                    """),
+                    {
+                        "n": target,
+                        "a": val,
+                        "d": t_date.strftime('%Y-%m-%d'), # Formats date for backdating
+                        "my": m_year,
+                        "pd": int(p_day) # Ensures day is a standard number
                     }
                 )
                 s.commit()
-            st.success(f"✅ Day {p_day} recorded for {m_year}!")
+            
+            st.success(f"✅ Recorded GHS {amt} for {target} on {m_year}")
+            st.balloons()
+            
+        except Exception as e:
+            st.error(f"Failed to save: {e}")
     else:
         st.warning("Please register a client first.")
 

@@ -28,8 +28,7 @@ if not check_password():
 
 # --- 1. INITIALIZE CLOUD CONNECTION ---
 # This connects to your Supabase via the secrets you set up
-conn = st.connection("postgresql",
-type="sql")
+conn = st.connection("postgresql",type="sql")
 
 # --- 2. SECURITY GATE ---
 def check_password():

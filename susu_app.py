@@ -84,12 +84,10 @@ st.set_page_config(page_title="RUCHANET DAILY SUSU", page_icon="🏦", layout="w
 st.sidebar.title("🏦 Main Menu")
 choice = st.sidebar.radio("Go To:", [
     "📊 Business Dashboard", 
-    "👤 Register New Client", 
-    "💸 Record Transaction", 
-    "🔎 Digital Passbook", 
+    "💸 Record Transaction",
+    "🔎 Digital Passbook",
     "🗑️ Admin Tools"
 ])
-
 # --- 5. MODULES ---
 
 # --- DASHBOARD ---
@@ -111,52 +109,6 @@ if choice == "📊 Business Dashboard":
         st.dataframe(df.sort_values(by='date', ascending=False), use_container_width=True)
     else:
         st.info("No data found in the cloud yet.")
-
-# --- REGISTRATION ---
-elif choice == "👤 Register New Client":
-        st.title("👤 Register New Client")
-        
-        # 1. Generate ID (001/03/2026)
-        try:
-            res = conn.query("SELECT COUNT(*) as count FROM clients", ttl=0)
-            next_num = int(res['count'].iloc[0]) + 1
-            gen_id = f"{next_num:03d}/{datetime.now().strftime('%m/%Y')}"
-            st.info(f"Generated ID: *{gen_id}*")
-        except:
-            gen_id = "001/" + datetime.now().strftime('%m/%Y')
-
-        with st.form("reg_form", clear_on_submit=True):
-            name = st.text_input("Full Name")
-            phone = st.text_input("Phone Number")
-            daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
-            
-            # Use camera_input for instant photos!
-            photo = st.camera_input("Take Client Photo")
-            
-            if photo is not None:
-                # Check file size (in bytes)
-                file_size = photo.size / 1024  # Convert to KB
-                if file_size > 500:
-                    st.warning(f"⚠️ This photo is {file_size:.1f}KB. Try to stay under 500KB to save space.")
-            
-            if st.form_submit_button("Register to Cloud"):
-                p_url = None
-                # If they took a photo, we link the URL (Upload requires 'supabase' library, 
-                # so for now we store the public URL path based on their ID)
-                if photo:
-                    p_url = f"https://xrqcejmtqfrztfwggsbc.supabase.co/storage/v1/object/public/client-photos/{gen_id.replace('/', '_')}.jpg"
-                
-                try:
-                    with conn.session as s:
-                        s.execute(
-                            text("INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url) VALUES (:i, :n, :p, :d, :u)"),
-                            {"i": gen_id, "n": name, "p": phone, "d": daily, "u": p_url}
-                        )
-                        s.commit()
-                    st.success(f"✅ {name} registered successfully!")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Error: {e}")
 
 # --- TRANSACTIONS (WITH 31-DAY & OLD DATA LOGIC) ---
 elif choice == "💸 Record Transaction":
@@ -248,34 +200,49 @@ if not client_history.empty:
     )
 
 # --- DELETE / ADMIN ---
-elif choice == "🗑️ Admin Tools":
-    st.title("🗑️ Administrative Controls")
-    st.warning("Deletion is permanent and cannot be undone.")
-    
-    clients = conn.query("SELECT client_name FROM clients", ttl=0)
-    if not clients.empty:
-        to_delete = st.selectbox("Select Client to DELETE", clients['client_name'].tolist())
-        confirm = st.checkbox(f"I am sure I want to delete {to_delete}")
+elif choice == "🛠 Admin Tools":
+        st.title("🛠 Admin Dashboard")
         
-        if st.button("EXECUTE PERMANENT DELETE") and confirm:
-            with conn.session as s:
-                # Delete from both tables
-                s.execute(text("DELETE FROM contributions WHERE client_name = :n"), params={"n": to_delete})
-                s.execute(text("DELETE FROM clients WHERE client_name = :n"), params={"n": to_delete})
-                s.commit()
-            st.success(f"💥 {to_delete} has been removed from the cloud.")
-            st.rerun()
+        # --- TAB 1: REGISTER NEW CLIENTS ---
+        tab1, tab2 = st.tabs(["👤 Register Client", "💾 Database Backups"])
+        
+        with tab1:
+            st.subheader("Register New Client")
+            # 1. Generate ID (e.g., 001/03/2026)
+            res = conn.query("SELECT COUNT(*) as count FROM clients", ttl=0)
+            next_num = int(res['count'].iloc[0]) + 1
+            gen_id = f"{next_num:03d}/{datetime.now().strftime('%m/%Y')}"
+            
+            with st.form("reg_form", clear_on_submit=True):
+                name = st.text_input("Full Name")
+                phone = st.text_input("Phone Number")
+                daily = st.number_input("Daily Mark (GHS)", min_value=1.0)
+                photo = st.camera_input("Take Client Photo")
+                
+                if st.form_submit_button("Register to Cloud"):
+                    p_url = f"https://xrqcejmtqfrztfwggsbc.supabase.co/storage/v1/object/public/client-photos/{gen_id.replace('/', '_')}.jpg"
+                    try:
+                        with conn.session as s:
+                            s.execute(
+                                text("INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url) VALUES (:i, :n, :p, :d, :u)"),
+                                {"i": gen_id, "n": name, "p": phone, "d": daily, "u": p_url}
+                            )
+                            s.commit()
+                        st.success(f"✅ Registered {name} with ID: {gen_id}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
-            # Get all data from the cloud
-all_data = conn.query("SELECT * FROM contributions", ttl=0)
-
-if not all_data.empty:
-    # Convert data to a CSV file (Excel friendly)
-    csv = all_data.to_csv(index=False).encode('utf-8')
-    
-    st.download_button(
-        label="📥 Download Full Database Backup",
-        data=csv,
-        file_name=f"susu_backup_{datetime.now().strftime('%Y-%m-%d')}.csv",
-        mime='text/csv',
-    )
+        with tab2:
+            st.subheader("System Backups")
+            # Get all data for backup
+            all_data = conn.query("SELECT * FROM contributions", ttl=0)
+            if not all_data.empty:
+                csv = all_data.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Full Database Backup (Excel)",
+                    data=csv,
+                    file_name=f"susu_backup_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                    mime='text/csv',
+                )
+            else:
+                st.info("No transactions found to backup.")

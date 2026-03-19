@@ -199,7 +199,7 @@ if not client_history.empty:
         mime='text/csv',
     )
 
-# --- DELETE / ADMIN ---
+# --- ADMIN / REGISTER & DELETE CLIENT --- #
 elif choice == "🛠 Admin Tools":
         st.title("🛠 Admin Dashboard")
         

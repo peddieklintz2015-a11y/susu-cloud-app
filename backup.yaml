@@ -1,0 +1,23 @@
+name: Weekly Data Backup
+on:
+  schedule:
+    - cron: '0 23 * * 0' # 11:00 PM every Sunday
+  workflow_dispatch: # This allows you to run it manually to test!
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          pip install pandas sqlalchemy psycopg2-binary st-postgresql-connection
+      - name: Run backup script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: python send_backup.py

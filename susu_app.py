@@ -43,7 +43,7 @@ def check_password():
             st.text_input("Admin Password", type="password", key="login_input")
             submit_button = st.form_submit_button("Log In")
             
-            if submit_button("Log In"):
+            if submit_button:
                 if   st.session_state["login input"] == st.secrets["passwords"]["login_password"]:
                     st.session_state["password_correct"] = True
                     st.rerun()

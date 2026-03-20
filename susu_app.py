@@ -5,45 +5,33 @@ from datetime import datetime
 import smtplib
 from email.message import EmailMessage
 
+# --- 1. SETUP & STYLE ---
+st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
+
+# Database Connection (Ensure your secrets.toml has [connections.postgresql])
+conn = st.connection("postgresql", type="sql")
+
 def set_custom_style():
     st.markdown("""
     <style>
-    /* Vibrant Buttons */
-    div.stButton > button:first-child {
-        background-color: #FFD700;
-        color: #212529;
-        font-weight: bold;
-        border: none;
-    }
-    
-    /* Energetic Metric Cards */
-    [data-testid="stMetricValue"] {
-        color: #FF4500;
-        font-size: 30px;
-    }
-    
-    /* Sleek Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #212529;
-        color: #F8F9FA;
-    }
+    div.stButton > button:first-child { background-color: #FFD700; color: #212529; font-weight: bold; border: none; }
+    [data-testid="stMetricValue"] { color: #FFD700; }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# Run this once at the start
 set_custom_style()
 
-# --- 1. SECURITY GATE (MUST BE FIRST) ---
+# --- 2. SECURITY GATE (Fixed NameError & TypeError) ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
         with st.form("login_form"):
+            # Using key="login_input" puts the value into session_state immediately
             st.text_input("Admin Password", type="password", key="login_input")
             submit_button = st.form_submit_button("Log In")
             
             if submit_button:
-                # Check against secrets. Note the space in ["login input"] vs ["login_input"]
-                # It is safer to use: st.session_state["login_input"]
+                # Check directly against session_state and your secrets
                 if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
                     st.session_state["password_correct"] = True
                     st.rerun()
@@ -55,112 +43,105 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 1. INITIALIZE CLOUD CONNECTION ---
-# This connects to your Supabase via the secrets you set up
-conn = st.connection("postgresql",type="sql")
+# --- 3. GLOBAL DATA FETCH (Prevents 'Unbound' errors across pages) ---
+clients = conn.query("SELECT * FROM clients", ttl=0)
+contributions = conn.query("SELECT * FROM contributions", ttl=0)
 
-# --- 3. UI SETUP ---
-st.set_page_config(page_title="RUCHANET DAILY SUSU", page_icon="🏦", layout="wide")
-# --- MAIN APP LOGIC ---
-if 'conn' in locals():
-    # Load Master Data (Global access for all pages)
-    clients = conn.query("SELECT * FROM clients", ttl=0)
-    df = conn.query("SELECT * FROM contributions", ttl=0)
+# --- 4. SIDEBAR NAVIGATION ---
+# Ensure emojis match the 'elif' statements exactly to avoid routing bugs
+menu = ["📊 Dashboard", "💸 Transactions", "📋 Digital Passbook", "🛠 Admin Tools"]
+choice = st.sidebar.selectbox("Go To:", menu)
 
-    choice = st.sidebar.selectbox("Go To:", ["📊 Dashboard", "💸 Transactions", "📋 Passbook", "🛠 Admin Tools"])
+# --- 5. PAGE ROUTING ---
 
-    # --- 1. DASHBOARD & DAILY SUMMARY ---
-    if choice == "📊 Dashboard":
-        st.title("📊 Financial Overview")
-        if not df.empty:
-            # Stats for the top row
-            total_vault = df['amount'].sum()
-            total_fees = df['fee'].sum() if 'fee' in df.columns else 0.0
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("💰 Total Vault", f"GHS {total_vault:,.2f}")
-            c2.metric("📈 Total Commission", f"GHS {total_fees:,.2f}")
-            c3.metric("🏦 Net Liability", f"GHS {(total_vault - total_fees):,.2f}")
-
-            st.divider()
-            
-            # DAILY SUMMARY (Cash-on-hand check)
-            st.subheader("📅 Today's Cash Summary")
-            today = datetime.now().strftime('%Y-%m-%d')
-            today_df = df[df['date'].astype(str) == today]
-            
-            if not today_df.empty:
-                inflow = today_df[today_df['amount'] > 0]['amount'].sum()
-                outflow = today_df[today_df['amount'] < 0]['amount'].abs().sum()
-                k1, k2 = st.columns(2)
-                k1.metric("Today's Inflow", f"GHS {inflow:.2f}")
-                k2.metric("Today's Outflow", f"GHS {outflow:.2f}")
-            else:
-                st.info("No cash recorded today yet.")
-        else:
-            st.info("No data yet.")
-
-    # --- 2. TRANSACTIONS & COMMISSION LOGIC ---
-    elif choice == "🍀 Record Transaction":
-       st.title("💸 Transaction Entry")
-    
-    # 1. Fetch data first to avoid 'possibly unbound' errors
-    clients_df = conn.query("SELECT client_name, daily_mark FROM clients", ttl=0)
-    contributions_df = conn.query("SELECT * FROM contributions", ttl=0)
-    
-    if not clients_df.empty:
-        # Define target immediately
-        target = st.selectbox("Select Client", clients_df['client_name'].tolist())
+if choice == "📊 Dashboard":
+    st.title("📊 Financial Overview")
+    if not contributions.empty:
+        total_vault = contributions['amount'].sum()
+        total_fees = contributions['fee'].sum()
         
-        # Get the specific rate for this client
-        client_row = clients_df[clients_df['client_name'] == target]
-        d_mark = float(client_row['daily_mark'].iloc[0])
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Vault", f"GHS {total_vault:,.2f}")
+        c2.metric("Total Commission", f"GHS {total_fees:,.2f}")
+        c3.metric("Net Liability", f"GHS {(total_vault - total_fees):,.2f}")
+        
+        st.divider()
+        st.subheader("🗓 Today's Cash Summary")
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_data = contributions[contributions['date'].astype(str) == today_str]
+        
+        col_a, col_b = st.columns(2)
+        col_a.metric("Today's Inflow", f"GHS {today_data[today_data['amount'] > 0]['amount'].sum():,.2f}")
+        col_b.metric("Today's Outflow", f"GHS {abs(today_data[today_data['amount'] < 0]['amount'].sum()):,.2f}")
+    else:
+        st.info("No transaction data available yet.")
+
+elif choice == "💸 Transactions":
+    st.title("💸 Record Transaction")
+    if not clients.empty:
+        target = st.selectbox("Select Client", clients['client_name'].tolist())
+        client_row = clients[clients['client_name'] == target].iloc[0]
+        d_mark = float(client_row['daily_mark'])
         
         col1, col2 = st.columns(2)
         with col1:
             ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
             num_marks = st.number_input("Number of Marks", min_value=1, step=1)
-            calculated_amt = float(num_marks * d_mark)
-            st.info(f"💰 Rate: {calculated_amt:.2f} GHS ({num_marks} x {d_mark})")
+            calc_amt = float(num_marks * d_mark)
+            st.info(f"💰 Rate: {calc_amt:.2f} GHS")
 
         with col2:
             t_date = st.date_input("Transaction Date", value=datetime.now())
-            is_old = st.checkbox("📍 Migration: Old data entry")
+            is_old = st.checkbox("📍 Migration Entry")
 
         if st.button("Confirm & Save"):
-            # --- 🛡️ COMMISSION CHECK LOGIC ---
+            # Commission logic for first deposit of the month
             curr_month = t_date.strftime('%Y-%m')
-            # Check if client has already paid a deposit this month
-            has_paid_this_month = not contributions_df[
-                (contributions_df['client_name'] == target) & 
-                (contributions_df['date'].astype(str).str.contains(curr_month)) &
-                (contributions_df['amount'] > 0)
+            has_paid = not contributions[
+                (contributions['client_name'] == target) & 
+                (contributions['date'].astype(str).str.contains(curr_month)) &
+                (contributions['amount'] > 0)
             ].empty
             
-            fee_amt = 0.0
-            if not has_paid_this_month and ttype == "Deposit":
-                fee_amt = d_mark  # Take 1 full mark as commission
-                st.warning(f"Commission of GHS {fee_amt} detected for the new month.")
+            fee_amt = d_mark if (not has_paid and ttype == "Deposit" and not is_old) else 0.0
+            final_val = calc_amt if ttype == "Deposit" else -calc_amt
 
-            final_val = calculated_amt if ttype == "Deposit" else -calculated_amt
-            
-            try:
-                with conn.session as s:
-                    s.execute(
-                        text("""INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
-                             VALUES (:n, :a, :d, :mc, :f)"""),
-                        {"n": target, "a": final_val, "d": t_date, "mc": int(num_marks), "f": fee_amt}
-                    )
-                    s.commit()
-                st.success(f"✅ Saved GHS {calculated_amt:.2f} for {target}")
-                st.balloons()
-            except Exception as e:
-                st.error(f"Cloud Error: {e}")
+            with conn.session as s:
+                s.execute(
+                    text("INSERT INTO contributions (client_name, amount, date, marks_covered, fee) VALUES (:n, :a, :d, :mc, :f)"),
+                    {"n": target, "a": final_val, "d": t_date, "mc": int(num_marks), "f": fee_amt}
+                )
+                s.commit()
+            st.success(f"Successfully recorded GHS {calc_amt} for {target}")
+            st.rerun()
     else:
-        st.warning("No clients found. Please register one in Admin Tools.")
+        st.error("Please register clients in Admin Tools first.")
 
-    # --- 3. ADMIN TOOLS & EMAIL ---
-    elif choice == "🛠 Admin Tools":
+elif choice == "📋 Digital Passbook":
+    st.title("📋 Digital Passbook")
+    if not clients.empty:
+        search_term = st.text_input("🔍 Search Client Name", "")
+        filtered = clients[clients['client_name'].str.contains(search_term, case=False)]['client_name'].tolist()
+        target_client = st.selectbox("Select Client to View", filtered)
+        
+        if target_client:
+            c_info = clients[clients['client_name'] == target_client].iloc[0]
+            col_img, col_txt = st.columns([1, 2])
+            with col_img:
+                st.image(c_info['photo_url'], width=200)
+            with col_txt:
+                c_history = contributions[contributions['client_name'] == target_client]
+                balance = c_history['amount'].sum() if not c_history.empty else 0.0
+                st.subheader(target_client)
+                st.metric("Current Balance", f"GHS {balance:,.2f}")
+                st.write(f"📞 Phone: {c_info['phone']}")
+            st.divider()
+            st.dataframe(c_history.sort_values(by='date', ascending=False), use_container_width=True)
+    else:
+        st.info("No clients registered yet.")
+
+    # --- 8. ADMIN TOOLS & EMAIL ---
+elif choice == "🛠 Admin Tools":
         st.title("🛠 Admin Dashboard")
         t1, t2, t3= st.tabs( ["👤 Registration", "📧 Reports", "🗑️ Data Cleanup"])
         with t1:
@@ -268,5 +249,3 @@ if 'conn' in locals():
                         del st.session_state['undo_info'] # Clear log
                         st.success("Transaction Restored!")
                         st.rerun()
-            elif admin_pass != "":
-                st.error("Incorrect Admin Password")

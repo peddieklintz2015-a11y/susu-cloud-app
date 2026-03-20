@@ -44,11 +44,11 @@ def check_password():
             submit_button = st.form_submit_button("Log In")
             
             if submit_button:
-                if pwd == st.secrets["password"]:
-                    st.session_state["password_correct"] = True
+                if login_input == st.secrets["login_password"]:
+                    st.session_state["LOGIN SUCCESSFULLY"] = True
                     st.rerun()
                 else:
-                    st.error("❌ Invalid Password")
+                    st.error("❌ Invalid Login Password")
         return False
     return True
 
@@ -208,7 +208,8 @@ if 'conn' in locals():
             # Pulling password from secrets.toml
             admin_pass = st.text_input("Enter Admin Password", type="password")
             
-            if admin_pass == st.secrets["auth"]["admin_password"]:
+            if admin_pass == st.secrets["passwords"]["admin_password"]:
+                st.success("Admin Access Granted:Deletion Tool Unlocked")
                 # --- SEARCHABLE DELETE ---
                 st.write("### 🔎 Search & Delete Transaction")
                 search_term = st.text_input("Filter by Client Name")

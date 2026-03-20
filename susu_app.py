@@ -40,12 +40,12 @@ def check_password():
         
         # Wrapping in a form makes the "Enter" key work
         with st.form("login_form"):
-            pwd = st.text_input("Admin Password", type="password")
+            st.text_input("Admin Password", type="password", key="login_input")
             submit_button = st.form_submit_button("Log In")
             
-            if submit_button:
-                if login_input == st.secrets["login_password"]:
-                    st.session_state["LOGIN SUCCESSFULLY"] = True
+            if submit_button("Log In"):
+                if   st.session_state["login input"] == st.secrets["passwords"]["login_password"]:
+                    st.session_state["password_correct"] = True
                     st.rerun()
                 else:
                     st.error("❌ Invalid Login Password")
@@ -206,9 +206,9 @@ if 'conn' in locals():
         with t3:
             st.subheader("🛑 Restricted Data Cleanup")
             # Pulling password from secrets.toml
-            admin_pass = st.text_input("Enter Admin Password", type="password")
+            admin_entry = st.text_input("Enter Admin Password", type="password")
             
-            if admin_pass == st.secrets["passwords"]["admin_password"]:
+            if admin_entry == st.secrets["passwords"]["admin_password"]:
                 st.success("Admin Access Granted:Deletion Tool Unlocked")
                 # --- SEARCHABLE DELETE ---
                 st.write("### 🔎 Search & Delete Transaction")

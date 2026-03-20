@@ -21,6 +21,10 @@ def set_custom_style():
 
 set_custom_style()
 
+# --- 3. GLOBAL DATA FETCH (Prevents 'Unbound' errors across pages) ---
+clients = conn.query("SELECT * FROM clients", ttl=0)
+df = conn.query("SELECT * FROM contributions", ttl=0)
+
 # --- 2. SECURITY GATE (Fixed NameError & TypeError) ---
 def check_password():
     if "password_correct" not in st.session_state:
@@ -42,10 +46,6 @@ def check_password():
 
 if not check_password():
     st.stop()
-
-# --- 3. GLOBAL DATA FETCH (Prevents 'Unbound' errors across pages) ---
-clients = conn.query("SELECT * FROM clients", ttl=0)
-contributions = conn.query("SELECT * FROM contributions", ttl=0)
 
 # --- 4. SIDEBAR NAVIGATION ---
 # Ensure emojis match the 'elif' statements exactly to avoid routing bugs
@@ -140,7 +140,7 @@ elif choice == "📋 Digital Passbook":
     else:
         st.info("No clients registered yet.")
 
-    # --- 8. ADMIN TOOLS & EMAIL ---
+    # --- 6. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
         st.title("🛠 Admin Dashboard")
         t1, t2, t3= st.tabs( ["👤 Registration", "📧 Reports", "🗑️ Data Cleanup"])
@@ -209,22 +209,25 @@ elif choice == "🛠 Admin Tools":
                     st.error(f"Failed to send email: {e}")
 
         with t3:
-            st.subheader("🛑 Restricted Data Cleanup")
-            # Pulling password from secrets.toml
-            admin_entry = st.text_input("Enter Admin Password", type="password")
+        st.subheader("🛑 Restricted Data Cleanup")
+        # Pulling password from secrets
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+        
+        # Check against the correct secret path
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
+            st.success("Admin Access Granted: Deletion Tool Unlocked")
             
-            if admin_entry == st.secrets["passwords"]["admin_password"]:
-                st.success("Admin Access Granted:Deletion Tool Unlocked")
-                # --- SEARCHABLE DELETE ---
-                st.write("### 🔎 Search & Delete Transaction")
-                search_term = st.text_input("Filter by Client Name")
+            # Use 'contributions' to match your global fetch at Line 25
+            if not contributions.empty:
+                st.write("### 🔍 Search & Delete Transaction")
+                search_term = st.text_input("Filter by Client Name", key="del_search_input")
                 
-                if not df.empty:
-                    # Filter list based on search
-                    f_df = df[df['client_name'].str.contains(search_term, case=False)] if search_term else df.head(10)
-                    
+                # Filter logic
+                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
+                
+                if not f_df.empty:
                     to_del = st.selectbox("Select entry to remove", 
-                      f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1))
+                                          options=f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1))
                     
                     if st.button("🗑️ Permanent Delete"):
                         # Store in session state for Undo BEFORE deleting
@@ -232,20 +235,25 @@ elif choice == "🛠 Admin Tools":
                         
                         parts = to_del.split(" | ")
                         with conn.session as s:
-                            s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d AND amount = :a"), 
-                                      {"n": parts[1], "d": parts[0], "a": float(parts[2].replace("GHS ", ""))})
+                            s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
+                                      {"n": parts[1], "d": parts[0]})
                             s.commit()
                         st.rerun()
+                else:
+                    st.info("No transactions found for this search.")
 
-                # --- THE UNDO BUTTON ---
-                if 'undo_info' in st.session_state:
-                    st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
-                    if st.button("⏪ Undo Deletion"):
-                        u = st.session_state['undo_info'].split(" | ")
-                        with conn.session as s:
-                            s.execute(text("INSERT INTO contributions (client_name, amount, date) VALUES (:n, :a, :d)"),
-                                      {"n": u[1], "a": float(u[2].replace("GHS ", "")), "d": u[0]})
-                            s.commit()
-                        del st.session_state['undo_info'] # Clear log
-                        st.success("Transaction Restored!")
-                        st.rerun()
+        # --- THE UNDO BUTTON (Properly Indented) ---
+        if 'undo_info' in st.session_state:
+            st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
+            if st.button("⏪ Undo Deletion"):
+                u = st.session_state['undo_info'].split(" | ")
+                with conn.session as s:
+                    s.execute(text("INSERT INTO contributions (client_name, amount, date) VALUES (:n, :a, :d)"),
+                              {"n": u[1], "a": float(u[2].replace("GHS ", "").replace(",", "")), "d": u[0]})
+                    s.commit()
+                del st.session_state['undo_info']
+                st.success("Transaction Restored!")
+                st.rerun()
+        
+        elif admin_entry != "":
+            st.error("Incorrect Admin Password")

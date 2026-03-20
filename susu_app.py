@@ -101,38 +101,63 @@ if 'conn' in locals():
             st.info("No data yet.")
 
     # --- 2. TRANSACTIONS & COMMISSION LOGIC ---
-    elif choice == "💸 Transactions":
-        st.title("💸 Record Transaction")
-        if not clients.empty:
-            target = st.selectbox("Select Client", clients['client_name'].tolist())
-            d_mark = clients[clients['client_name'] == target]['daily_mark'].iloc[0]
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                ttype = st.radio("Type", ["Deposit", "Withdrawal"])
-                num_marks = st.number_input("Marks", min_value=1, step=1)
-                calc_amt = float(num_marks * d_mark)
-                st.info(f"💰 Rate: {calc_amt:.2f} GHS")
-            
-            t_date = st.date_input("Date", value=datetime.now())
+    elif choice == "🍀 Record Transaction":
+       st.title("💸 Transaction Entry")
+    
+    # 1. Fetch data first to avoid 'possibly unbound' errors
+    clients_df = conn.query("SELECT client_name, daily_mark FROM clients", ttl=0)
+    contributions_df = conn.query("SELECT * FROM contributions", ttl=0)
+    
+    if not clients_df.empty:
+        # Define target immediately
+        target = st.selectbox("Select Client", clients_df['client_name'].tolist())
+        
+        # Get the specific rate for this client
+        client_row = clients_df[clients_df['client_name'] == target]
+        d_mark = float(client_row['daily_mark'].iloc[0])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
+            num_marks = st.number_input("Number of Marks", min_value=1, step=1)
+            calculated_amt = float(num_marks * d_mark)
+            st.info(f"💰 Rate: {calculated_amt:.2f} GHS ({num_marks} x {d_mark})")
 
-            if st.button("Confirm & Save"):
-                # COMMISSION CHECK: Is this the first deposit of the month?
-                curr_month = t_date.strftime('%Y-%m')
-                has_paid_this_month = not df[(df['client_name'] == target) & (df['date'].astype(str).str.contains(curr_month))].empty
-                
-                fee_amt = 0.0
-                if not has_paid_this_month and ttype == "Deposit":
-                    fee_amt = float(d_mark) # Take 1 full mark
-                    st.warning(f"Commission of GHS {fee_amt} will be recorded.")
+        with col2:
+            t_date = st.date_input("Transaction Date", value=datetime.now())
+            is_old = st.checkbox("📍 Migration: Old data entry")
 
-                final_val = calc_amt if ttype == "Deposit" else -calc_amt
-                
+        if st.button("Confirm & Save"):
+            # --- 🛡️ COMMISSION CHECK LOGIC ---
+            curr_month = t_date.strftime('%Y-%m')
+            # Check if client has already paid a deposit this month
+            has_paid_this_month = not contributions_df[
+                (contributions_df['client_name'] == target) & 
+                (contributions_df['date'].astype(str).str.contains(curr_month)) &
+                (contributions_df['amount'] > 0)
+            ].empty
+            
+            fee_amt = 0.0
+            if not has_paid_this_month and ttype == "Deposit":
+                fee_amt = d_mark  # Take 1 full mark as commission
+                st.warning(f"Commission of GHS {fee_amt} detected for the new month.")
+
+            final_val = calculated_amt if ttype == "Deposit" else -calculated_amt
+            
+            try:
                 with conn.session as s:
-                    s.execute(text("INSERT INTO contributions (client_name, amount, date, marks_covered, fee) VALUES (:n, :a, :d, :mc, :f)"),
-                              {"n": target, "a": final_val, "d": t_date, "mc": num_marks, "f": fee_amt})
+                    s.execute(
+                        text("""INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
+                             VALUES (:n, :a, :d, :mc, :f)"""),
+                        {"n": target, "a": final_val, "d": t_date, "mc": int(num_marks), "f": fee_amt}
+                    )
                     s.commit()
-                st.success("Transaction Saved!")
+                st.success(f"✅ Saved GHS {calculated_amt:.2f} for {target}")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Cloud Error: {e}")
+    else:
+        st.warning("No clients found. Please register one in Admin Tools.")
 
     # --- 3. ADMIN TOOLS & EMAIL ---
     elif choice == "🛠 Admin Tools":

@@ -202,14 +202,14 @@ elif choice == "🛠 Admin Tools":
 
                     # Note: You need a Gmail App Password for this to work
                     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                        server.login("peddieklintz2015@gmail.com", "rmsrmhkewwnvhqvl")
+                        server.login("peddieklintz2015@gmail.com", "")
                         server.send_message(msg)
                     st.success("Report sent!")
                 except Exception as e:
                     st.error(f"Failed to send email: {e}")
 
         with t3:
-        st.subheader("🛑 Restricted Data Cleanup")
+         st.subheader("🛑 Restricted Data Cleanup")
         # Pulling password from secrets
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         

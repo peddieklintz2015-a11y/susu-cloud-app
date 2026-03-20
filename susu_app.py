@@ -37,14 +37,14 @@ set_custom_style()
 def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
-        
-        # Wrapping in a form makes the "Enter" key work
         with st.form("login_form"):
             st.text_input("Admin Password", type="password", key="login_input")
             submit_button = st.form_submit_button("Log In")
             
             if submit_button:
-                if   st.session_state["login input"] == st.secrets["passwords"]["login_password"]:
+                # Check against secrets. Note the space in ["login input"] vs ["login_input"]
+                # It is safer to use: st.session_state["login_input"]
+                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
                     st.session_state["password_correct"] = True
                     st.rerun()
                 else:
@@ -52,7 +52,6 @@ def check_password():
         return False
     return True
 
-# Stop the app here if not logged in
 if not check_password():
     st.stop()
 

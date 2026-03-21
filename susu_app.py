@@ -22,8 +22,9 @@ def set_custom_style():
 set_custom_style()
 
 # --- 3. GLOBAL DATA FETCH (Prevents 'Unbound' errors across pages) ---
-clients = conn.query("SELECT * FROM clients", ttl=0)
-df = conn.query("SELECT * FROM contributions", ttl=0)
+# Update your fetch to include type hints
+clients: pd.DataFrame = conn.query("SELECT * FROM clients", ttl=0)
+contributions: pd.DataFrame = conn.query("SELECT * FROM contributions", ttl=0)
 
 # --- 2. SECURITY GATE (Fixed NameError & TypeError) ---
 def check_password():
@@ -117,29 +118,59 @@ elif choice == "💸 Transactions":
     else:
         st.error("Please register clients in Admin Tools first.")
 
-elif choice == "📋 Digital Passbook":
-    st.title("📋 Digital Passbook")
-    if not clients.empty:
-        search_term = st.text_input("🔍 Search Client Name", "")
-        filtered = clients[clients['client_name'].str.contains(search_term, case=False)]['client_name'].tolist()
-        target_client = st.selectbox("Select Client to View", filtered)
-        
-        if target_client:
-            c_info = clients[clients['client_name'] == target_client].iloc[0]
-            col_img, col_txt = st.columns([1, 2])
-            with col_img:
-                st.image(c_info['photo_url'], width=200)
-            with col_txt:
-                c_history = contributions[contributions['client_name'] == target_client]
-                balance = c_history['amount'].sum() if not c_history.empty else 0.0
-                st.subheader(target_client)
-                st.metric("Current Balance", f"GHS {balance:,.2f}")
-                st.write(f"📞 Phone: {c_info['phone']}")
-            st.divider()
-            st.dataframe(c_history.sort_values(by='date', ascending=False), use_container_width=True)
-    else:
-        st.info("No clients registered yet.")
+# --- DIGITAL PASSBOOK SECTION ---
+st.title("📑 Digital Passbook")
 
+# 1. Search and Select Client
+search_name = st.text_input("🔍 Search Client Name", placeholder="Enter name to filter...")
+filtered_clients = clients[clients['client_name'].str.contains(search_name, case=False)] if not clients.empty else clients
+
+if not filtered_clients.empty:
+    target_client = st.selectbox("Select Client to View", options=filtered_clients['client_name'].tolist())
+    
+    # Fetch specific client info
+    c_info = clients[clients['client_name'] == target_client].iloc[0]
+    
+    col_img, col_txt = st.columns([1, 2])
+    
+    with col_img:
+        # --- FIXED: PHOTO SAFETY CHECK ---
+        # Prevents 'NoneType' object has no attribute 'format' error
+        if c_info['photo_url'] and str(c_info['photo_url']).strip() != "None":
+            st.image(c_info['photo_url'], width=200, caption=f"ID: {c_info['client_id']}")
+        else:
+            # Placeholder for missing photos
+            st.warning("👤 No photo on file.")
+
+    with col_txt:
+        # Filter contributions for this specific client
+        c_history = contributions[contributions['client_name'] == target_client] if not contributions.empty else pd.DataFrame()
+        
+        # Calculate Balance
+        balance = c_history['amount'].sum() if not c_history.empty else 0.0
+        
+        st.subheader(target_client)
+        st.metric("Current Balance", f"GHS {balance:,.2f}")
+        st.write(f"📞 *Phone:* {c_info['phone']}")
+        st.write(f"🆔 *Client ID:* {c_info['client_id']}")
+
+    st.divider()
+    
+    # 2. Transaction History Table
+    st.write("### 🕒 Transaction History")
+    if not c_history.empty:
+        # Sort by date descending so newest is on top
+        history_display = c_history[['date', 'amount']].sort_values(by='date', ascending=False)
+        # Format amount for display
+        history_display['amount'] = history_display['amount'].apply(lambda x: f"GHS {float(x):,.2f}")
+        st.dataframe(history_display, use_container_width=True)
+    else:
+        # Indent this line! This fixes the syntax error at line 169
+        st.info("No transactions found for this client.")
+
+# This closes the 'if' search block. Indent this too!
+    else:
+    st.info("No clients found matching that name. Please register them in Admin Tools.")
     # --- 6. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
         st.title("🛠 Admin Dashboard")
@@ -218,29 +249,31 @@ elif choice == "🛠 Admin Tools":
             st.success("Admin Access Granted: Deletion Tool Unlocked")
             
             # Use 'contributions' to match your global fetch at Line 25
-            if not contributions.empty:
-                st.write("### 🔍 Search & Delete Transaction")
-                search_term = st.text_input("Filter by Client Name", key="del_search_input")
-                
-                # Filter logic
+        if not contributions.empty:
+                search_term = st.text_input("Filter by Client Name", key="cleanup_search")
+                # Create a filtered view
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
                 
                 if not f_df.empty:
                     to_del = st.selectbox("Select entry to remove", 
-                                          options=f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1))
+                        options=f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1))
                     
                     if st.button("🗑️ Permanent Delete"):
-                        # Store in session state for Undo BEFORE deleting
+                        # Save to session state for the Undo button
                         st.session_state['undo_info'] = to_del
-                        
                         parts = to_del.split(" | ")
+                        
                         with conn.session as s:
                             s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
-                                      {"n": parts[1], "d": parts[0]})
+                                     {"n": parts[1], "d": parts[0]})
                             s.commit()
+                        st.success("Record Deleted.")
                         st.rerun()
                 else:
-                    st.info("No transactions found for this search.")
+                    st.info("No Transaction found for this search.")
+        
+        elif admin_entry != "":
+            st.error("❌ Incorrect Admin Password")
 
         # --- THE UNDO BUTTON (Properly Indented) ---
         if 'undo_info' in st.session_state:

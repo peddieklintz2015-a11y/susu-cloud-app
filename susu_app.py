@@ -155,24 +155,21 @@ if not filtered_clients.empty:
         st.write(f"🆔 *Client ID:* {c_info['client_id']}")
 
     st.divider()
-
+    
     # 2. Transaction History Table
     st.write("### 🕒 Transaction History")
     if not c_history.empty:
         # Sort by date descending so newest is on top
         history_display = c_history[['date', 'amount']].sort_values(by='date', ascending=False)
         # Format amount for display
-        history_display['amount'] = history_display['amount'].apply(lambda x: f"GHS {float(x):,.2f}")
+        history_display['amount'] = history_display['amount'].apply(lambda x: f"GHS {x:,.2f}")
         st.dataframe(history_display, use_container_width=True)
     else:
-        # Indent this line! This fixes the syntax error at line 169
         st.info("No transactions found for this client.")
-    # This closes the 'if' search block. Indent this too!
-    else:
+else:
     st.info("No clients found matching that name. Please register them in Admin Tools.")
 
-    # --- 6. ADMIN TOOLS & EMAIL ---
-
+# --- 6. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
         st.title("🛠 Admin Dashboard")
         t1, t2, t3= st.tabs( ["👤 Registration", "📧 Reports", "🗑️ Data Cleanup"])

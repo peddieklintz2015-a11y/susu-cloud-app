@@ -118,62 +118,49 @@ elif choice == "💸 Transactions":
     else:
         st.error("Please register clients in Admin Tools first.")
 
-# --- DIGITAL PASSBOOK SECTION ---
-st.title("📑 Digital Passbook")
-
-# 1. Search and Select Client
-search_name = st.text_input("🔍 Search Client Name", placeholder="Enter name to filter...")
-filtered_clients = clients[clients['client_name'].str.contains(search_name, case=False)] if not clients.empty else clients
-
-if not filtered_clients.empty:
-    target_client = st.selectbox("Select Client to View", options=filtered_clients['client_name'].tolist())
+# --- 2. DIGITAL PASSBOOK ---
+elif choice == "📑 Digital Passbook":
+    st.title("📑 Client Passbook")
+    search = st.text_input("🔍 Search Client Name")
     
-    # Fetch specific client info
-    c_info = clients[clients['client_name'] == target_client].iloc[0]
+    filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
     
-    col_img, col_txt = st.columns([1, 2])
-    
-    with col_img:
-        # --- FIXED: PHOTO SAFETY CHECK ---
-        # Prevents 'NoneType' object has no attribute 'format' error
-        if c_info['photo_url'] and str(c_info['photo_url']).strip() != "None":
-            st.image(c_info['photo_url'], width=200, caption=f"ID: {c_info['client_id']}")
+    if not filtered.empty:
+        target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
+        c_info = clients[clients['client_name'] == target].iloc[0]
+        
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            # SAFETY CHECK: Fixes the 'NoneType' photo error
+            if c_info['photo_url'] and str(c_info['photo_url']) != "None":
+                st.image(c_info['photo_url'], width=200)
+            else:
+                st.warning("👤 No photo on file.")
+        
+        with col_b:
+            c_history = contributions[contributions['client_name'] == target]
+            balance = c_history['amount'].sum() if not c_history.empty else 0.0
+            st.subheader(target)
+            st.metric("Current Balance", f"GHS {balance:,.2f}")
+            st.write(f"📞 Phone: {c_info['phone']}")
+        
+        st.divider()
+        st.write("### 🕒 Transaction History")
+        if not c_history.empty:
+            st.dataframe(c_history.sort_values(by='date', ascending=False), use_container_width=True)
         else:
-            # Placeholder for missing photos
-            st.warning("👤 No photo on file.")
-
-    with col_txt:
-        # Filter contributions for this specific client
-        c_history = contributions[contributions['client_name'] == target_client] if not contributions.empty else pd.DataFrame()
-        
-        # Calculate Balance
-        balance = c_history['amount'].sum() if not c_history.empty else 0.0
-        
-        st.subheader(target_client)
-        st.metric("Current Balance", f"GHS {balance:,.2f}")
-        st.write(f"📞 *Phone:* {c_info['phone']}")
-        st.write(f"🆔 *Client ID:* {c_info['client_id']}")
-
-    st.divider()
-    
-    # 2. Transaction History Table
-    st.write("### 🕒 Transaction History")
-    if not c_history.empty:
-        # Sort by date descending so newest is on top
-        history_display = c_history[['date', 'amount']].sort_values(by='date', ascending=False)
-        # Format amount for display
-        history_display['amount'] = history_display['amount'].apply(lambda x: f"GHS {x:,.2f}")
-        st.dataframe(history_display, use_container_width=True)
+            st.info("No transactions found.")
     else:
-        st.info("No transactions found for this client.")
-else:
-    st.info("No clients found matching that name. Please register them in Admin Tools.")
+        st.error("No matching clients found.")
 
-# --- 6. ADMIN TOOLS & EMAIL ---
+# --- 3. ADMIN TOOLS ---
 elif choice == "🛠 Admin Tools":
+    # SECURITY GATE
+    password = st.sidebar.text_input("Enter Admin Passcode", type="password")
+    if password == "1234": # Replace with your actual passcode
         st.title("🛠 Admin Dashboard")
-        t1, t2, t3= st.tabs( ["👤 Registration", "📧 Reports", "🗑️ Data Cleanup"])
-        with t1:
+    t1, t2, t3 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup"])
+    with t1:
             st.subheader("👤 Register New Client")
             
             # 1. Automatic ID Generation (Safe from blanks)
@@ -216,8 +203,9 @@ elif choice == "🛠 Admin Tools":
                             st.rerun() # Refresh list immediately
                         except Exception as e:
                             st.error(f"Cloud Error: {e}")
-            
-        with t2:
+    with t2:
+            total_vault = 0.00
+            total_fees = 0.00
             st.subheader("Weekly Email Report")
             my_email = st.text_input("Receiver Email", value="peddieklintz2015@gmail.com")
             if st.button("📧 Send Report to My Inbox"):
@@ -236,18 +224,17 @@ elif choice == "🛠 Admin Tools":
                     st.success("Report sent!")
                 except Exception as e:
                     st.error(f"Failed to send email: {e}")
-
-        with t3:
+    with t3:
          st.subheader("🛑 Restricted Data Cleanup")
         # Pulling password from secrets
-        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+    admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         # Check against the correct secret path
-        if admin_entry == st.secrets["passwords"]["admin_password"]:
+    if admin_entry == st.secrets["passwords"]["admin_password"]:
             st.success("Admin Access Granted: Deletion Tool Unlocked")
             
             # Use 'contributions' to match your global fetch at Line 25
-        if not contributions.empty:
+    if not contributions.empty:
                 search_term = st.text_input("Filter by Client Name", key="cleanup_search")
                 # Create a filtered view
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
@@ -270,11 +257,11 @@ elif choice == "🛠 Admin Tools":
                 else:
                     st.info("No Transaction found for this search.")
         
-        elif admin_entry != "":
+elif admin_entry != "":
             st.error("❌ Incorrect Admin Password")
 
         # --- THE UNDO BUTTON (Properly Indented) ---
-        if 'undo_info' in st.session_state:
+if 'undo_info' in st.session_state:
             st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
             if st.button("⏪ Undo Deletion"):
                 u = st.session_state['undo_info'].split(" | ")
@@ -286,5 +273,5 @@ elif choice == "🛠 Admin Tools":
                 st.success("Transaction Restored!")
                 st.rerun()
         
-        elif admin_entry != "":
+elif admin_entry != "":
             st.error("Incorrect Admin Password")

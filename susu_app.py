@@ -159,17 +159,17 @@ elif choice == "🛠 Admin Tools":
     t1, t2, t3 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup"])
 
     with t1:
-            st.subheader("👤 Register New Client")
+        st.subheader("👤 Register New Client")
             
             # 1. Automatic ID Generation (Safe from blanks)
-            if not clients.empty:
+        if not clients.empty:
                 next_num = len(clients) + 1
-            else:
+        else:
                 next_num = 1
-            gen_id = f"{next_num:03d}/{datetime.now().strftime('%m/%Y')}"
-            st.info(f"Next available ID: *{gen_id}*")
+        gen_id = f"{next_num:03d}/{datetime.now().strftime('%m/%Y')}"
+        st.info(f"Next available ID: *{gen_id}*")
 
-            with st.form("reg_form", clear_on_submit=True):
+        with st.form("reg_form", clear_on_submit=True):
                 name = st.text_input("Full Name (Required)")
                 phone = st.text_input("Phone Number (Required)")
                 daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
@@ -230,7 +230,7 @@ elif choice == "🛠 Admin Tools":
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         # Check against the correct secret path
-    if admin_entry == st.secrets["passwords"]["admin_password"]:
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
             st.success("Admin Access Granted: Deletion Tool Unlocked")
             
             # Use 'contributions' to match your global fetch at Line 25
@@ -258,7 +258,7 @@ elif choice == "🛠 Admin Tools":
                     st.info("No Transaction found for this search.")
 
         # --- THE UNDO BUTTON (Properly Indented) ---
-if 'undo_info' in st.session_state:
+    if 'undo_info' in st.session_state:
             st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
             if st.button("⏪ Undo Deletion"):
                 u = st.session_state['undo_info'].split(" | ")
@@ -270,5 +270,5 @@ if 'undo_info' in st.session_state:
                 st.success("Transaction Restored!")
                 st.rerun()
         
-elif admin_entry != "":
-            st.error("❌ Incorrect Admin Password")
+            elif admin_entry != "":
+                st.error("❌ Incorrect Admin Password")

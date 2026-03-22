@@ -2,3 +2,4 @@ streamlit
 sqlalchemy
 pandas
 psycopg2-binary
+smtplib

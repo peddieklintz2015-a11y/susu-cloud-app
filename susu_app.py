@@ -155,11 +155,9 @@ elif choice == "📑 Digital Passbook":
 
 # --- 3. ADMIN TOOLS ---
 elif choice == "🛠 Admin Tools":
-    # SECURITY GATE
-    password = st.sidebar.text_input("Enter Admin Passcode", type="password")
-    if password == "1234": # Replace with your actual passcode
-        st.title("🛠 Admin Dashboard")
+    st.title("🛠 Admin Dashboard")
     t1, t2, t3 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup"])
+
     with t1:
             st.subheader("👤 Register New Client")
             
@@ -203,6 +201,7 @@ elif choice == "🛠 Admin Tools":
                             st.rerun() # Refresh list immediately
                         except Exception as e:
                             st.error(f"Cloud Error: {e}")
+
     with t2:
             total_vault = 0.00
             total_fees = 0.00
@@ -224,10 +223,11 @@ elif choice == "🛠 Admin Tools":
                     st.success("Report sent!")
                 except Exception as e:
                     st.error(f"Failed to send email: {e}")
+
     with t3:
-         st.subheader("🛑 Restricted Data Cleanup")
+        st.subheader("🛑 Restricted Data Cleanup")
         # Pulling password from secrets
-    admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         # Check against the correct secret path
     if admin_entry == st.secrets["passwords"]["admin_password"]:
@@ -256,9 +256,6 @@ elif choice == "🛠 Admin Tools":
                         st.rerun()
                 else:
                     st.info("No Transaction found for this search.")
-        
-elif admin_entry != "":
-            st.error("❌ Incorrect Admin Password")
 
         # --- THE UNDO BUTTON (Properly Indented) ---
 if 'undo_info' in st.session_state:
@@ -274,4 +271,4 @@ if 'undo_info' in st.session_state:
                 st.rerun()
         
 elif admin_entry != "":
-            st.error("Incorrect Admin Password")
+            st.error("❌ Incorrect Admin Password")

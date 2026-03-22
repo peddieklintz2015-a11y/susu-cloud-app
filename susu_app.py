@@ -257,7 +257,38 @@ elif choice == "🛠 Admin Tools":
                 else:
                     st.info("No Transaction found for this search.")
 
-        # --- THE UNDO BUTTON (Properly Indented) ---
+# --- NEW CLIENT DELETE SECTION ---
+    st.divider()
+    st.subheader("👤 Permanent Client Removal")
+    st.warning("🚨 CRITICAL: This deletes the client and ALL history.")
+
+        # 1. Fetch latest clients from Supabase
+    cleanup_clients = conn.query("SELECT * FROM clients", ttl=0)
+
+    if not cleanup_clients.empty:
+            # 2. Dropdown to select the profile
+            client_to_wipe = st.selectbox(
+                "Select Client Profile to Delete", 
+                options=cleanup_clients['client_name'].tolist(),
+                key="cleanup_client_profile_list"
+            )
+            
+            # 3. Security Checkbox
+            confirm_profile_del = st.checkbox(f"I confirm I want to wipe {client_to_wipe} from the system.")
+            
+            if st.button("❌ Delete Client Profile Permanently"):
+                if confirm_profile_del:
+                    with conn.session as s:
+                        # Use the 'text' wrapper to fix the red errors from Image 12
+                        s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": client_to_wipe})
+                        s.execute(text("DELETE FROM clients WHERE client_name = :n"), {"n": client_to_wipe})
+                        s.commit()
+                    st.success(f"🔥 {client_to_wipe} removed successfully.")
+                    st.rerun()
+                else:
+                    st.error("Please check the confirmation box first.")
+
+                            # --- THE UNDO BUTTON (Properly Indented) ---
     if 'undo_info' in st.session_state:
             st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
             if st.button("⏪ Undo Deletion"):

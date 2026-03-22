@@ -14,10 +14,31 @@ conn = st.connection("postgresql", type="sql")
 def set_custom_style():
     st.markdown("""
     <style>
-    div.stButton > button:first-child { background-color: #FFD700; color: #212529; font-weight: bold; border: none; }
-    [data-testid="stMetricValue"] { color: #FFD700; }
+    /* Vibrant Buttons */
+    div.stButton > button:first-child {
+        background-color: #FFD700;
+        color: #212529;
+        font-weight: bold;
+        border: none;
+    }
+    
+    /* Energetic Metric Cards */
+    [data-testid="stMetricValue"] {
+        color: #FF4500;
+        font-size: 30px;
+    }
+    
+    /* Sleek Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #212529;
+        color: #F8F9FA;
+    }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
+
+# Run this once at the start
+set_custom_style()
+
 
 set_custom_style()
 

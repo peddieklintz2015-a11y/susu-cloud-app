@@ -248,49 +248,38 @@ if choice == "🛠 Admin Tools":
 
     # --- FIX 2: Email Security ---
     with t2:
-    st.subheader("Weekly Email Report")
-    
-    # 1. Calculate the data first so Python knows what the variables are
-    total_vault = contributions['amount'].sum()
-    total_fees = contributions['fee'].sum()
-    report_date = datetime.now().strftime("%d %b %Y")
+        st.subheader("Weekly Email Report")
+        if st.button("📧 Send Report"):
+            try:
+                # 1. Setup Message
+                msg = EmailMessage()
+                msg['Subject'] = "Susu Weekly Update"
+                msg['From'] = st.secrets["emails"]["sender_email"]
+                msg['To'] = st.secrets["emails"]["receiver_email"]
+                msg.set_content("Weekly Report Content...")
 
-    if st.button("📧 Send Report"):
-        try:
-            msg = EmailMessage()
-            msg['Subject'] = f"RUCHANET Weekly Report - {report_date}"
-            
-            # FIX: Use the NICKNAMES from your secrets, not the actual email strings
-            msg['From'] = st.secrets["emails"]["sender_email"]
-            msg['To'] = st.secrets["emails"]["receiver_email"]
+                # 2. Add the HTML version
+                html_content = f"""
+                <html>
+                    <body style="font-family: Arial; color: #333;">
+                        <h2 style="color: #FFD700;">RUCHANET DAILY SUSU</h2>
+                        <p>Weekly report generated on {datetime.now().strftime('%Y-%m-%d')}</p>
+                    </body>
+                </html>
+                """
+                msg.add_alternative(html_content, subtype='html')
 
-            html_content = f"""
-            <html>
-                <body style="font-family: sans-serif; color: #333;">
-                    <div style="background-color: #212529; padding: 20px; text-align: center;">
-                        <h1 style="color: #FFD700; margin: 0;">RUCHANET DAILY SUSU</h1>
-                    </div>
-                    <div style="padding: 20px; border: 1px solid #ddd;">
-                        <h3>Financial Summary</h3>
-                        <p>Total Vault: <strong>GHS {total_vault:,.2f}</strong></p>
-                        <p>Total Commission: <strong style="color: green;">GHS {total_fees:,.2f}</strong></p>
-                    </div>
-                </body>
-            </html>
-            """
-            msg.add_alternative(html_content, subtype='html')
+                # 3. Connect and Send
+                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                    server.login(
+                        st.secrets["emails"]["sender_email"], 
+                        st.secrets["emails"]["app_password"]
+                    )
+                    server.send_message(msg)
+                st.success("✅ Report sent securely!")
 
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(
-                    st.secrets["emails"]["sender_email"], 
-                    st.secrets["emails"]["app_password"]
-                )
-                server.send_message(msg)
-            
-            st.success("✅ Report sent successfully!")
-            
-        except Exception as e:
-            st.error(f"Email Error: {e}")
+            except Exception as e:
+                st.error(f"Email Error: {e}")
 
     # --- FIX 4: Secure Undo Logic ---
     with t3:

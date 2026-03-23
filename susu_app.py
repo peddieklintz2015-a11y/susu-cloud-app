@@ -11,13 +11,26 @@ st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 def set_custom_style():
     st.markdown("""
     <style>
-    div.stButton > button:first-child { background-color: #FFD700; color: #212529; font-weight: bold; }
-    [data-testid="stMetricValue"] { color: #FF4500; font-size: 30px; }
-    [data-testid="stSidebar"] { background-color: #212529; }
+    /* Force Vibrant Buttons */
+    div.stButton > button:first-child {
+        background-color: #FFD700 !important;
+        color: #212529 !important;
+        font-weight: bold !important;
+        border: none !important;
+    }
+    
+    /* Force Energetic Metric Cards */
+    [data-testid="stMetricValue"] {
+        color: #FF4500 !important;
+        font-size: 30px !important;
+    }
+    
+    /* Force Sidebar Colors */
+    [data-testid="stSidebar"] {
+        background-color: #212529 !important;
+    }
     </style>
-    """, unsafe_allow_html=True)
-
-set_custom_style()
+""", unsafe_allow_html=True)
 
 # --- 2. DATABASE & DATA FETCH ---
 conn = st.connection("postgresql", type="sql")
@@ -235,22 +248,49 @@ if choice == "🛠 Admin Tools":
 
     # --- FIX 2: Email Security ---
     with t2:
-        st.subheader("Weekly Email Report")
-        if st.button("📧 Send Report"):
-            try:
-                msg = EmailMessage()
-                msg.set_content("Weekly Report Content...")
-                msg['Subject'] = "Susu Weekly Update"
-                msg['From'] = st.secrets["emails"]["peddieklints2015@gmail.com"]
-                msg['To'] = st.secrets["emails"]["peddieklintz2015@gmail.com"]
-                
-                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                    # Use App Password from secrets
-                    server.login(st.secrets["emails"]["peddieklintz2015@gmail.com"], st.secrets["emails"]["app_password"])
-                    server.send_message(msg)
-                st.success("Report sent securely!")
-            except Exception as e:
-                st.error(f"Email Error: {e}")
+    st.subheader("Weekly Email Report")
+    
+    # 1. Calculate the data first so Python knows what the variables are
+    total_vault = contributions['amount'].sum()
+    total_fees = contributions['fee'].sum()
+    report_date = datetime.now().strftime("%d %b %Y")
+
+    if st.button("📧 Send Report"):
+        try:
+            msg = EmailMessage()
+            msg['Subject'] = f"RUCHANET Weekly Report - {report_date}"
+            
+            # FIX: Use the NICKNAMES from your secrets, not the actual email strings
+            msg['From'] = st.secrets["emails"]["sender_email"]
+            msg['To'] = st.secrets["emails"]["receiver_email"]
+
+            html_content = f"""
+            <html>
+                <body style="font-family: sans-serif; color: #333;">
+                    <div style="background-color: #212529; padding: 20px; text-align: center;">
+                        <h1 style="color: #FFD700; margin: 0;">RUCHANET DAILY SUSU</h1>
+                    </div>
+                    <div style="padding: 20px; border: 1px solid #ddd;">
+                        <h3>Financial Summary</h3>
+                        <p>Total Vault: <strong>GHS {total_vault:,.2f}</strong></p>
+                        <p>Total Commission: <strong style="color: green;">GHS {total_fees:,.2f}</strong></p>
+                    </div>
+                </body>
+            </html>
+            """
+            msg.add_alternative(html_content, subtype='html')
+
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                server.login(
+                    st.secrets["emails"]["sender_email"], 
+                    st.secrets["emails"]["app_password"]
+                )
+                server.send_message(msg)
+            
+            st.success("✅ Report sent successfully!")
+            
+        except Exception as e:
+            st.error(f"Email Error: {e}")
 
     # --- FIX 4: Secure Undo Logic ---
     with t3:

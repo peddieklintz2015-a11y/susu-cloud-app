@@ -32,6 +32,23 @@ def set_custom_style():
     </style>
 """, unsafe_allow_html=True)
 
+# --- 3. SECURITY GATE ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
+        with st.form("login_form"):
+            st.text_input("Admin Password", type="password", key="login_input")
+            if st.form_submit_button("Log In"):
+                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid Login Password")
+        return False
+    return True
+if not check_password():
+    st.stop()
+
 # --- 2. DATABASE & DATA FETCH ---
 conn = st.connection("postgresql", type="sql")
 
@@ -49,6 +66,16 @@ def fetch_data():
    # Calling the function
 clients, contributions = fetch_data()
      #ID--- generation function ---#
+combined_df = pd.merge(
+    contributions, 
+    clients[['client_id', 'name']],  # We only need the ID and Name from the clients table
+    on='client_id', 
+    how='left'
+)
+
+# 3. Display the result in your Streamlit app
+st.subheader("Recent Contributions with Client Names")
+st.dataframe(combined_df, use_container_width=True)
 def get_next_gen_id(conn=conn):
     month_year = datetime.now().strftime("%m/%y")
     try:
@@ -69,23 +96,6 @@ def get_next_gen_id(conn=conn):
     except Exception as e:
         st.error(f"ID Generation Error: {e}")
         return f"001/{month_year}"
-
-# --- 3. SECURITY GATE ---
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
-        with st.form("login_form"):
-            st.text_input("Admin Password", type="password", key="login_input")
-            if st.form_submit_button("Log In"):
-                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
-                    st.session_state["password_correct"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid Login Password")
-        return False
-    return True
-if not check_password():
-    st.stop()
 
 # --- 4. NAVIGATION ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]

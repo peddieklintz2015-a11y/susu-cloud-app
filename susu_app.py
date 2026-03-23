@@ -285,7 +285,7 @@ if choice == "🛠 Admin Tools":
     with t3:
          st.subheader("🛑 Restricted Data Cleanup")
         # Pulling password from secrets
-    admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         # Check against the correct secret path
     if admin_entry == st.secrets["passwords"]["admin_password"]:

@@ -288,11 +288,11 @@ if choice == "🛠 Admin Tools":
          admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         # Check against the correct secret path
-    if admin_entry == st.secrets["passwords"]["admin_password"]:
+         if admin_entry == st.secrets["passwords"]["admin_password"]:
             st.success("Admin Access Granted: Deletion Tool Unlocked")
             
             # Use 'contributions' to match your global fetch at Line 25
-    if not contributions.empty:
+         if not contributions.empty:
                 search_term = st.text_input("Filter by Client Name", key="cleanup_search")
                 # Create a filtered view
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
@@ -314,7 +314,7 @@ if choice == "🛠 Admin Tools":
                         st.rerun()
                 else:
                     st.info("No Transaction found for this search.")
-    elif admin_entry != "":
+         elif admin_entry != "":
             st.error("❌ Incorrect Admin Password")
 
         # --- THE UNDO BUTTON (Properly Indented) ---

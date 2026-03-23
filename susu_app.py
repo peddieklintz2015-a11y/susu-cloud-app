@@ -35,13 +35,40 @@ def set_custom_style():
 # --- 2. DATABASE & DATA FETCH ---
 conn = st.connection("postgresql", type="sql")
 
-# Wrapped in a function to allow manual refreshing
 def fetch_data():
-    clients = conn.query("SELECT * FROM clients", ttl=0)
-    contributions = conn.query("SELECT * FROM contributions", ttl=0)
-    return clients, contributions
-
+    # Streamlit's conn.query returns a DataFrame by default.
+    # We can explicitly ensure they are treated as DataFrames here.
+    clients_df = conn.query("SELECT * FROM clients", ttl=0)
+    contributions_df = conn.query("SELECT * FROM contributions", ttl=0)
+    
+    # Example of using Pandas explicitly (so the 'pd' error goes away):
+    # This ensures any 'None' values in the database don't break your app
+    clients_df = clients_df.fillna("") 
+    
+    return clients_df, contributions_df
+   # Calling the function
 clients, contributions = fetch_data()
+     #ID--- generation function ---#
+def get_next_gen_id(conn=conn):
+    month_year = datetime.now().strftime("%m/%y")
+    try:
+        with conn.session as s:
+            # We use SQL to find the highest ID for the current month
+            result = s.execute(
+                text("SELECT client_id FROM clients WHERE client_id LIKE :pattern"),
+                {"pattern": f"%/{month_year}"}
+            ).fetchall()
+            
+            if not result:
+                return f"001/{month_year}"
+            
+            # Extract numbers: row[0] gets the string '001/03/26'
+            numeric_parts = [int(row[0].split('/')[0]) for row in result]
+            next_number = max(numeric_parts) + 1
+            return f"{str(next_number).zfill(3)}/{month_year}"
+    except Exception as e:
+        st.error(f"ID Generation Error: {e}")
+        return f"001/{month_year}"
 
 # --- 3. SECURITY GATE ---
 def check_password():
@@ -57,7 +84,6 @@ def check_password():
                     st.error("❌ Invalid Login Password")
         return False
     return True
-
 if not check_password():
     st.stop()
 
@@ -68,6 +94,7 @@ choice = st.sidebar.selectbox("Go To:", menu)
 # --- 5. PAGE ROUTING ---
 
 if choice == "📊 Dashboard":
+    # ... (Your Dashboard code is fine) ...
     st.title("📊 Financial Overview")
     if not contributions.empty:
         total_vault = contributions['amount'].sum()
@@ -81,7 +108,6 @@ if choice == "📊 Dashboard":
         st.divider()
         st.subheader("🗓 Today's Cash Summary")
         today_str = datetime.now().strftime('%Y-%m-%d')
-        # Ensure date column is compared correctly
         today_data = contributions[contributions['date'].astype(str) == today_str]
         
         col_a, col_b = st.columns(2)
@@ -91,6 +117,7 @@ if choice == "📊 Dashboard":
         st.info("No transaction data available yet.")
 
 elif choice == "💸 Transactions":
+    # ... (Your Transactions code is fine) ...
     st.title("💸 Record Transactions")
     if not clients.empty:
         target = st.selectbox("Select Client", clients['client_name'].tolist())
@@ -110,7 +137,6 @@ elif choice == "💸 Transactions":
 
         if st.button("Confirm & Save"):
             curr_month = t_date.strftime('%Y-%m')
-            # Fixed month filtering logic
             has_paid = not contributions[
                 (contributions['client_name'] == target) & 
                 (contributions['date'].astype(str).str.startswith(curr_month)) &
@@ -134,79 +160,43 @@ elif choice == "💸 Transactions":
     else:
         st.error("Please register clients in Admin Tools first.")
 
-# --- 📑 DIGITAL PASSBOOK PAGE ---
 elif choice == "📑 Digital Passbook":
+    # ... (Your Passbook code is fine) ...
     st.title("📑 Client Passbook")
-    
-    # Search functionality
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name to filter...")
-    
-    # Filter logic
     if not clients.empty:
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
-        
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
-            
-            # Layout: Photo on left, Stats on right
             col_a, col_b = st.columns([1, 2])
-            
             with col_a:
-                # Robust Photo Check
                 photo_url = c_info.get('photo_url')
                 if photo_url and str(photo_url).strip().lower() != "none":
-                    try:
-                        st.image(photo_url, width=230, caption=f"ID: {c_info['client_id']}")
-                    except:
-                        st.warning("⚠️ Image could not be loaded from storage.")
+                    st.image(photo_url, width=230, caption=f"ID: {c_info['client_id']}")
                 else:
-                    st.info("👤 No photo uploaded for this client.")
-            
+                    st.info("👤 No photo uploaded.")
             with col_b:
-                # Calculate specific balance for this user
                 user_history = contributions[contributions['client_name'] == target]
                 current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
-                
                 st.subheader(f"Account: {target}")
                 st.metric("Current Savings Balance", f"GHS {current_balance:,.2f}")
-                st.write(f"📞 *Phone:* {c_info['phone']}")
-                st.write(f"💰 *Daily Rate:* GHS {c_info['daily_mark']:.2f}")
-            
+                st.write(f"📞 Phone: {c_info['phone']}")
+                st.write(f"💰 Daily Rate: GHS {c_info['daily_mark']:.2f}")
             st.divider()
-            
-            # Transaction Table
-            st.write("### 🕒 Full Transaction History")
             if not user_history.empty:
-                # Formatting the dataframe for better readability
                 display_df = user_history.sort_values(by='date', ascending=False).copy()
-                display_df['date'] = pd.to_datetime(display_df['date']).dt.date
-                
-                st.dataframe(
-                    display_df[['date', 'amount', 'marks_covered', 'fee']], 
-                    use_container_width=True,
-                    column_config={
-                        "amount": st.column_config.NumberColumn("Amount (GHS)", format="%.2f"),
-                        "fee": st.column_config.NumberColumn("Commission (GHS)", format="%.2f"),
-                        "marks_covered": "Marks"
-                    }
-                )
-            else:
-                st.info("No transactions found for this account.")
-        else:
-            st.warning("No matching clients found for that search.")
+                st.dataframe(display_df[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
     else:
-        st.error("No clients registered in the system yet.")
+        st.error("No clients registered.")
 
-# --- FIX 3: Registration Form Logic ---
-# Move camera_input OUTSIDE the form for better reliability
-if choice == "🛠 Admin Tools":
+elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
     t1, t2, t3 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup"])
     
     with t1:
         st.subheader("👤 Register New Client")
-        # Camera input outside the form ensures the image buffer is captured correctly
+        # Keep camera input outside the form so it doesn't reset on click
         photo = st.camera_input("Take Client Photo (Required)")
         
         with st.form("reg_form", clear_on_submit=True):
@@ -216,85 +206,60 @@ if choice == "🛠 Admin Tools":
             submit = st.form_submit_button("Register to Cloud")
             
             if submit:
-                if not name or not phone or photo is None:
-                    st.error("❌ All fields including the photo are required!")
+                # 1. Validation check
+                if not name.strip() or not phone.strip() or photo is None:
+                    st.error("❌ All fields (Name, Phone, and Photo) are required!")
                 else:
-                    # Logic to save to Supabase goes here...
-                    st.success(f"Registered {name}!")
-    if submit:
-                         # BLANK FIELD VALIDATION
-                    if not name.strip() or not phone.strip() or photo is None:
-                        st.error("❌ All fields (Name, Phone, and Photo) are required!")
-                    else:
-                        # Proceed with save...
-                        st.success(f"Registered {name}!")
-                        try:
-                            # Standardize filename for storage
-                            file_path = f"{gen_id.replace('/', '_')}.jpg"
-                            p_url = f"https://xrqcejmtqfrztfwggsbc.supabase.co/storage/v1/object/public/client-photos/{file_path}"
-                            
-                            with conn.session as s:
-                                s.execute(
-                                    text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url) 
-                                         VALUES (:i, :n, :p, :d, :u)"""),
-                                    {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url}
-                                )
-                                s.commit()
-                            st.success(f"✅ Success! {name} registered with ID: {gen_id}")
-                            st.balloons()
-                            st.rerun() # Refresh list immediately
-                        except Exception as e:
-                            st.error(f"Cloud Error: {e}")
+                    try:
+                        # 2. GENERATE ID FIRST (Fixes your 'not defined' error)
+                        gen_id = get_next_gen_id(conn) 
 
-    # --- FIX 2: Email Security ---
+                        # 3. Handle photo naming
+                        file_path = f"{gen_id.replace('/', '_')}.jpg"
+                        # Standard public URL format for Supabase
+                        p_url = f"https://xrqcejmtqfrztfwggsbc.supabase.co/storage/v1/object/public/client-photos/{file_path}"
+
+                        # 4. Save to Database
+                        with conn.session as s:
+                            s.execute(
+                                text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                                        VALUES (:i, :n, :p, :d, :u)"""),
+                                {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url}
+                            )
+                            s.commit()
+
+                        st.success(f"✅ Registered {name} with ID: {gen_id}")
+                        st.balloons()
+                        # Removed st.rerun() here so you can see the success message
+                    except Exception as e:
+                        st.error(f"Cloud Error: {e}")
+
     with t2:
         st.subheader("Weekly Email Report")
         if st.button("📧 Send Report"):
             try:
-                # 1. Setup Message
                 msg = EmailMessage()
                 msg['Subject'] = "Susu Weekly Update"
                 msg['From'] = st.secrets["emails"]["sender_email"]
                 msg['To'] = st.secrets["emails"]["receiver_email"]
-                msg.set_content("Weekly Report Content...")
-
-                # 2. Add the HTML version
-                html_content = f"""
-                <html>
-                    <body style="font-family: Arial; color: #333;">
-                        <h2 style="color: #FFD700;">RUCHANET DAILY SUSU</h2>
-                        <p>Weekly report generated on {datetime.now().strftime('%Y-%m-%d')}</p>
-                    </body>
-                </html>
-                """
+                
+                html_content = f"<h2>RUCHANET DAILY SUSU</h2><p>Report Date: {datetime.now()}</p>"
                 msg.add_alternative(html_content, subtype='html')
 
-                # 3. Connect and Send
                 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                    server.login(
-                        st.secrets["emails"]["sender_email"], 
-                        st.secrets["emails"]["app_password"]
-                    )
+                    server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                     server.send_message(msg)
-                st.success("✅ Report sent securely!")
-
+                st.success("✅ Report sent!")
             except Exception as e:
                 st.error(f"Email Error: {e}")
 
-    # --- FIX 4: Secure Undo Logic ---
     with t3:
-         st.subheader("🛑 Restricted Data Cleanup")
-        # Pulling password from secrets
-         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+        st.subheader("🛑 Restricted Data Cleanup")
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
-        # Check against the correct secret path
-         if admin_entry == st.secrets["passwords"]["admin_password"]:
-            st.success("Admin Access Granted: Deletion Tool Unlocked")
-            
-            # Use 'contributions' to match your global fetch at Line 25
-         if not contributions.empty:
-                search_term = st.text_input("Filter by Client Name", key="cleanup_search")
-                # Create a filtered view
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
+            if not contributions.empty:
+                search_term = st.text_input("Filter by Client Name")
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
                 
                 if not f_df.empty:
@@ -302,32 +267,24 @@ if choice == "🛠 Admin Tools":
                         options=f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1))
                     
                     if st.button("🗑️ Permanent Delete"):
-                        # Save to session state for the Undo button
                         st.session_state['undo_info'] = to_del
                         parts = to_del.split(" | ")
-                        
                         with conn.session as s:
                             s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
                                      {"n": parts[1], "d": parts[0]})
                             s.commit()
-                        st.success("Record Deleted.")
+                        st.success("Deleted. Rerunning...")
                         st.rerun()
-                else:
-                    st.info("No Transaction found for this search.")
-         elif admin_entry != "":
-            st.error("❌ Incorrect Admin Password")
 
-        # --- THE UNDO BUTTON (Properly Indented) ---
-    if 'undo_info' in st.session_state:
-            st.warning(f"Recently Deleted: {st.session_state['undo_info']}")
-            if st.button("⏪ Undo Deletion"):
-                u = st.session_state['undo_info'].split(" | ")
-                with conn.session as s:
-                    s.execute(text("INSERT INTO contributions (client_name, amount, date) VALUES (:n, :a, :d)"),
-                              {"n": u[1], "a": float(u[2].replace("GHS ", "").replace(",", "")), "d": u[0]})
-                    s.commit()
-                del st.session_state['undo_info']
-                st.success("Transaction Restored!")
-                st.rerun()
-    elif admin_entry != "":
-            st.error("Incorrect Admin Password")
+            if 'undo_info' in st.session_state:
+                if st.button("⏪ Undo Deletion"):
+                    u = st.session_state['undo_info'].split(" | ")
+                    with conn.session as s:
+                        s.execute(text("INSERT INTO contributions (client_name, amount, date) VALUES (:n, :a, :d)"),
+                                  {"n": u[1], "a": float(u[2].replace("GHS ", "").replace(",", "")), "d": u[0]})
+                        s.commit()
+                    del st.session_state['undo_info']
+                    st.success("Restored!")
+                    st.rerun()
+        elif admin_entry != "":
+            st.error("❌ Incorrect Admin Password")

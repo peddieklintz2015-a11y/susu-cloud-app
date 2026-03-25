@@ -5,34 +5,60 @@ from datetime import datetime
 import smtplib
 from email.message import EmailMessage
 
-# --- 1. SETUP (MUST BE FIRST) ---
+# --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
 def set_custom_style():
     st.markdown("""
     <style>
-    /* Force Vibrant Buttons */
-    div.stButton > button:first-child {
-        background-color: #FFD700 !important;
-        color: #212529 !important;
-        font-weight: bold !important;
-        border: none !important;
-    }
-    
-    /* Force Energetic Metric Cards */
-    [data-testid="stMetricValue"] {
-        color: #FF4500 !important;
-        font-size: 30px !important;
-    }
-    
-    /* Force Sidebar Colors */
-    [data-testid="stSidebar"] {
-        background-color: #212529 !important;
-    }
+    div.stButton > button:first-child { background-color: #FFD700 !important; color: #212529 !important; font-weight: bold !important; border: none !important; }
+    [data-testid="stMetricValue"] { color: #FF4500 !important; font-size: 30px !important; }
+    [data-testid="stSidebar"] { background-color: #212529 !important; }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# --- 3. SECURITY GATE ---
+set_custom_style()
+
+# --- 2. DATABASE ---
+conn = st.connection("postgresql", type="sql")
+
+ # --- 3. DATA FUNCTIONS (Defined at top level so they are ALWAYS available) ---
+@st.cache_data(ttl=300)
+def fetch_data():
+    try: 
+        clients_df = conn.query("SELECT * FROM clients", ttl=600)
+        contributions_df = conn.query("SELECT * FROM contributions", ttl=600)
+        return clients_df.fillna(""), contributions_df.fillna(0)
+    except Exception as e:
+        # If there's a DNS error (like in your first screenshot), show it here
+        st.error(f"📡 Database connection error. Check internet or Supabase status: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+def get_next_gen_id(month_year):
+    try:
+        with conn.session as s:
+            # We look for the maximum ID that matches the current month pattern
+            query = text("SELECT client_id FROM clients WHERE client_id LIKE :pattern")
+            result = s.execute(query, {"pattern": f"%/{month_year}"}).fetchall()
+
+            if not result:
+                return f"001/{month_year}"
+
+            # Extract the numeric parts and find the max
+            # This handles cases like ['001/0326', '002/0326']
+            numeric_parts = [int(row[0].split('/')[0]) for row in result]
+            next_number = max(numeric_parts) + 1
+            
+            # Return the new ID padded with zeros (e.g., 005/0326)
+            return f"{str(next_number).zfill(3)}/{month_year}"
+
+    except Exception as e:
+        # Instead of just returning 001, we log the error so we know something is wrong
+        st.error(f"Error generating ID: {e}")
+        # Return None or raise the error so the app doesn't save a duplicate 001
+        return None
+
+# --- 4. SECURITY GATE ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
@@ -46,66 +72,38 @@ def check_password():
                     st.error("❌ Invalid Login Password")
         return False
     return True
+
 if not check_password():
     st.stop()
 
-# --- 2. DATABASE & DATA FETCH ---
-conn = st.connection("postgresql", type="sql")
+# --- 5. INITIALIZE DATA (Runs ONLY after login) ---
+with st.spinner("Fetching latest data..."):
+    clients, contributions = fetch_data()
+combined_df = pd.DataFrame()
 
-def fetch_data():
-    # Streamlit's conn.query returns a DataFrame by default.
-    # We can explicitly ensure they are treated as DataFrames here.
-    clients_df = conn.query("SELECT * FROM clients", ttl=0)
-    contributions_df = conn.query("SELECT * FROM contributions", ttl=0)
-    
-    # Example of using Pandas explicitly (so the 'pd' error goes away):
-    # This ensures any 'None' values in the database don't break your app
-    clients_df = clients_df.fillna("") 
-    
-    return clients_df, contributions_df
-   # Calling the function
-clients, contributions = fetch_data()
-     #ID--- generation function ---#
-combined_df = pd.merge(
-    contributions, 
-    clients[['client_id', 'name']],  # We only need the ID and Name from the clients table
-    on='client_id', 
-    how='left'
-)
-
-# 3. Display the result in your Streamlit app
-st.subheader("Recent Contributions with Client Names")
-st.dataframe(combined_df, use_container_width=True)
-def get_next_gen_id(conn=conn):
-    month_year = datetime.now().strftime("%m/%y")
+# Logic for combined data
+if not clients.empty and not contributions.empty:
     try:
-        with conn.session as s:
-            # We use SQL to find the highest ID for the current month
-            result = s.execute(
-                text("SELECT client_id FROM clients WHERE client_id LIKE :pattern"),
-                {"pattern": f"%/{month_year}"}
-            ).fetchall()
-            
-            if not result:
-                return f"001/{month_year}"
-            
-            # Extract numbers: row[0] gets the string '001/03/26'
-            numeric_parts = [int(row[0].split('/')[0]) for row in result]
-            next_number = max(numeric_parts) + 1
-            return f"{str(next_number).zfill(3)}/{month_year}"
+        combined_df = pd.merge(
+            contributions, 
+            clients[['client_id', 'client_name']], 
+            on='client_id', 
+            how='left'
+        )
     except Exception as e:
-        st.error(f"ID Generation Error: {e}")
-        return f"001/{month_year}"
+        st.warning(f"Merge error: {e}")
+        combined_df = contributions
+else:
+    combined_df = contributions
 
-# --- 4. NAVIGATION ---
+# --- 6. NAVIGATION & PAGE ROUTING ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 choice = st.sidebar.selectbox("Go To:", menu)
-
-# --- 5. PAGE ROUTING ---
 
 if choice == "📊 Dashboard":
     # ... (Your Dashboard code is fine) ...
     st.title("📊 Financial Overview")
+
     if not contributions.empty:
         total_vault = contributions['amount'].sum()
         total_fees = contributions['fee'].sum()
@@ -205,49 +203,58 @@ elif choice == "🛠 Admin Tools":
     t1, t2, t3 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup"])
     
     with t1:
-        st.subheader("👤 Register New Client")
-        # Keep camera input outside the form so it doesn't reset on click
-        photo = st.camera_input("Take Client Photo (Required)")
+     st.subheader("👤 Register New Client")
+    # 1. Capture Photo
+    photo = st.camera_input("Take Client Photo (Required)")
+    
+    with st.form("reg_form", clear_on_submit=True):
+        name = st.text_input("Full Name")
+        phone = st.text_input("Phone Number")
+        daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
+        submit = st.form_submit_button("Register to Cloud")
         
-        with st.form("reg_form", clear_on_submit=True):
-            name = st.text_input("Full Name")
-            phone = st.text_input("Phone Number")
-            daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
-            submit = st.form_submit_button("Register to Cloud")
-            
-            if submit:
-                # 1. Validation check
-                if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ All fields (Name, Phone, and Photo) are required!")
-                else:
-                    try:
-                        # 2. GENERATE ID FIRST (Fixes your 'not defined' error)
-                        gen_id = get_next_gen_id(conn) 
+        if submit:
+            if not name.strip() or not phone.strip() or photo is None:
+              st.error("❌ All fields (Name, Phone, and Photo) are required")
+            else:
+                try:
+                    # 2. GENERATE ID
+                    gen_id = get_next_gen_id()
 
-                        # 3. Handle photo naming
-                        file_path = f"{gen_id.replace('/', '_')}.jpg"
-                        # Standard public URL format for Supabase
-                        p_url = f"https://xrqcejmtqfrztfwggsbc.supabase.co/storage/v1/object/public/client-photos/{file_path}"
+                 # 3. INITIALIZE STORAGE CLIENT
+                    from supabase import create_client
+                    url = st.secrets["supabase_url"]
+                    key = st.secrets["supabase_key"]
+                    sb_client = create_client(url, key)
 
-                        # 4. Save to Database
-                        with conn.session as s:
-                            s.execute(
-                                text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                        VALUES (:i, :n, :p, :d, :u)"""),
-                                {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url}
-                            )
-                            s.commit()
+                   # 4. UPLOAD PHOTO TO BUCKET
+                    file_path = f"{gen_id.replace('/', '_')}.jpg"
+                    sb_client.storage.from_("client-photos").upload(
+                    path=file_path,
+                    file=photo.getvalue(),
+                    file_options={"content-type": "image/jpeg"})
 
-                        st.success(f"✅ Registered {name} with ID: {gen_id}")
-                        st.balloons()
-                        # Removed st.rerun() here so you can see the success message
-                    except Exception as e:
-                        st.error(f"Cloud Error: {e}")
+                  # 5. GENERATE THE LINK (p_url)
+                    p_url = f"{url}/storage/v1/object/public/client-photos/{file_path}"
+
+                 # 6. SAVE RECORD TO DATABASE
+                    with conn.session as s:
+                     s.execute(
+                        text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                                VALUES (:i, :n, :p, :d, :u)"""),
+                        {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                    s.commit()
+                    st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
+                    st.balloons()
+                
+                except Exception as e:
+                 # This 'except' block is what clears the 11 errors!
+                    st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
         st.subheader("Weekly Email Report")
-        if st.button("📧 Send Report"):
-            try:
+    if st.button("📧 Send Report"):
+        try:
                 msg = EmailMessage()
                 msg['Subject'] = "Susu Weekly Update"
                 msg['From'] = st.secrets["emails"]["sender_email"]
@@ -260,7 +267,7 @@ elif choice == "🛠 Admin Tools":
                     server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                     server.send_message(msg)
                 st.success("✅ Report sent!")
-            except Exception as e:
+        except Exception as e:
                 st.error(f"Email Error: {e}")
 
     with t3:

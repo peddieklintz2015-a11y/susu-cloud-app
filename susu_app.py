@@ -20,7 +20,7 @@ def set_custom_style():
 set_custom_style()
 
 # --- 2. DATABASE ---
-conn = st.connection("sql", type="sql")
+conn = st.connection("postgresql", type="sql")
 
 # --- 3. DATA FUNCTIONS (Defined at top level so they are ALWAYS available) ---
 @st.cache_data(ttl=300)

@@ -34,13 +34,7 @@ def fetch_data():
         st.error(f"📡 Database connection error. Check internet or Supabase status: {e}")
         return pd.DataFrame(), pd.DataFrame()
 clients_df, contributions_df = fetch_data()
-
-# --- SAFETY CHECK FOR DROPDOWNS ---
-if not clients_df.empty:
-    client_names = clients_df['name'].unique().tolist()
-else:
-    client_names = []
-
+clients_df.columns = clients_df.columns.str.strip().str.lower()
 # --- SAFETY CHECK FOR DROPDOWNS ---
 if not clients_df.empty:
     client_names = clients_df['name'].unique().tolist()

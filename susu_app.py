@@ -33,13 +33,6 @@ def fetch_data():
         # If there's a DNS error (like in your first screenshot), show it here
         st.error(f"📡 Database connection error. Check internet or Supabase status: {e}")
         return pd.DataFrame(), pd.DataFrame()
-clients_df, contributions_df = fetch_data()
-clients_df.columns = clients_df.columns.str.strip().str.lower()
-# --- SAFETY CHECK FOR DROPDOWNS ---
-if not clients_df.empty:
-    client_names = clients_df['name'].unique().tolist()
-else:
-    client_names = []
 
 def get_next_gen_id(month_year):
     try:
@@ -89,19 +82,17 @@ with st.spinner("Fetching latest data..."):
 combined_df = pd.DataFrame()
 
 # Logic for combined data
-if not clients.empty and not contributions.empty:
-    try:
-        combined_df = pd.merge(
-            contributions, 
-            clients[['client_id', 'client_name']], 
-            on='client_id', 
-            how='left'
-        )
-    except Exception as e:
-        st.warning(f"Merge error: {e}")
-        combined_df = contributions
+if not clients.empty:
+    # Check which column name actually exists in your database
+    if 'client_name' in clients.columns:
+        client_names = clients['client_name'].unique().tolist()
+    elif 'name' in clients.columns:
+        client_names = clients['name'].unique().tolist()
+    else:
+        client_names = []
+        st.warning("⚠️ Could not find a 'name' or 'client_name' column in the database.")
 else:
-    combined_df = contributions
+    client_names = []
 
 # --- 6. NAVIGATION & PAGE ROUTING ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]

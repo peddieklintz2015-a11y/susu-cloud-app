@@ -20,9 +20,9 @@ def set_custom_style():
 set_custom_style()
 
 # --- 2. DATABASE ---
-conn = st.connection("postgresql", type="sql")
+conn = st.connection("sql", type="sql")
 
- # --- 3. DATA FUNCTIONS (Defined at top level so they are ALWAYS available) ---
+# --- 3. DATA FUNCTIONS (Defined at top level so they are ALWAYS available) ---
 @st.cache_data(ttl=300)
 def fetch_data():
     try: 
@@ -204,9 +204,8 @@ elif choice == "🛠 Admin Tools":
     
     with t1:
      st.subheader("👤 Register New Client")
-    # 1. Capture Photo
-    photo = st.camera_input("Take Client Photo (Required)")
-    
+     # 1. Capture Photo
+     photo = st.camera_input("Take Client Photo (Required)")
     with st.form("reg_form", clear_on_submit=True):
         name = st.text_input("Full Name")
         phone = st.text_input("Phone Number")
@@ -250,7 +249,6 @@ elif choice == "🛠 Admin Tools":
                 except Exception as e:
                  # This 'except' block is what clears the 11 errors!
                     st.error(f"🚨 Registration Failed: {e}")
-
     with t2:
         st.subheader("Weekly Email Report")
     if st.button("📧 Send Report"):
@@ -269,7 +267,6 @@ elif choice == "🛠 Admin Tools":
                 st.success("✅ Report sent!")
         except Exception as e:
                 st.error(f"Email Error: {e}")
-
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
@@ -292,7 +289,6 @@ elif choice == "🛠 Admin Tools":
                             s.commit()
                         st.success("Deleted. Rerunning...")
                         st.rerun()
-
             if 'undo_info' in st.session_state:
                 if st.button("⏪ Undo Deletion"):
                     u = st.session_state['undo_info'].split(" | ")

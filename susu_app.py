@@ -82,17 +82,19 @@ with st.spinner("Fetching latest data..."):
 combined_df = pd.DataFrame()
 
 # Logic for combined data
-if not clients.empty:
-    # Check which column name actually exists in your database
-    if 'client_name' in clients.columns:
-        client_names = clients['client_name'].unique().tolist()
-    elif 'name' in clients.columns:
-        client_names = clients['name'].unique().tolist()
-    else:
-        client_names = []
-        st.warning("⚠️ Could not find a 'name' or 'client_name' column in the database.")
+if not clients.empty and not contributions.empty:
+    try:
+        combined_df = pd.merge(
+            contributions, 
+            clients[['client_id', 'client_name']], 
+            on='client_id', 
+            how='left'
+        )
+    except Exception as e:
+        st.warning(f"Merge error: {e}")
+        combined_df = contributions
 else:
-    client_names = []
+    combined_df = contributions
 
 # --- 6. NAVIGATION & PAGE ROUTING ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]

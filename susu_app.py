@@ -84,17 +84,30 @@ combined_df = pd.DataFrame()
 # Logic for combined data
 if not clients.empty and not contributions.empty:
     try:
-        combined_df = pd.merge(
-            contributions, 
-            clients[['client_id', 'client_name']], 
-            on='client_id', 
-            how='left'
-        )
+        # 1. Check if 'client_id' exists in contributions
+        if 'client_id' in contributions.columns:
+            combined_df = pd.merge(
+                contributions,
+                clients[['client_id', 'client_name']],
+                on='client_id',
+                how='left'
+            )
+        else:
+            # 2. If the names are different, specify them explicitly
+            # Replace 'ID_COLUMN_IN_CONTRIBUTIONS' with the actual name
+            combined_df = pd.merge(
+                contributions,
+                clients[['client_id', 'client_name']],
+                left_on='client_id', # Update this if contributions uses a different name
+                right_on='client_id',
+                how='left'
+            )
+            
     except Exception as e:
         st.warning(f"Merge error: {e}")
+        # Show columns to help you debug in the UI
+        st.write("Contributions columns:", contributions.columns.tolist())
         combined_df = contributions
-else:
-    combined_df = contributions
 
 # --- 6. NAVIGATION & PAGE ROUTING ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]

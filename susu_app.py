@@ -261,8 +261,8 @@ elif choice == "🛠 Admin Tools":
                     st.error(f"🚨 Registration Failed: {e}")
     with t2:
         st.subheader("Weekly Email Report")
-    if st.button("📧 Send Report"):
-        try:
+        if st.button("📧 Send Report"):
+            try:
                 msg = EmailMessage()
                 msg['Subject'] = "Susu Weekly Update"
                 msg['From'] = st.secrets["emails"]["sender_email"]
@@ -275,7 +275,7 @@ elif choice == "🛠 Admin Tools":
                     server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                     server.send_message(msg)
                 st.success("✅ Report sent!")
-        except Exception as e:
+            except Exception as e:
                 st.error(f"Email Error: {e}")
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")

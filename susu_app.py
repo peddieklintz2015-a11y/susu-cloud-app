@@ -4,6 +4,7 @@ from sqlalchemy import text
 from datetime import datetime
 import smtplib
 from email.message import EmailMessage
+import math
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
@@ -22,54 +23,56 @@ set_custom_style()
 # --- 2. DATABASE ---
 conn = st.connection("postgresql", type="sql")
 
-# --- 3. DATA FUNCTIONS (Defined at top level so they are ALWAYS available) ---
-@st.cache_data(ttl=300)
+# --- 3. DATA FUNCTIONS ---
+@st.cache_data(ttl=60)
 def fetch_data():
-    try: 
-        clients_df = conn.query("SELECT * FROM clients", ttl=600)
-        contributions_df = conn.query("SELECT * FROM contributions", ttl=600)
-        return clients_df.fillna(""), contributions_df.fillna(0)
+    try:
+        with conn.session as s:
+            clients_df = pd.DataFrame(s.execute(text("SELECT * FROM clients")).fetchall())
+            contributions_df = pd.DataFrame(s.execute(
+                text("SELECT id, client_name, amount, date, marks_covered, fee FROM contributions")
+            ).fetchall())
+            
+            if not contributions_df.empty:
+                contributions_df['date'] = pd.to_datetime(contributions_df['date'])
+                contributions_df['amount'] = pd.to_numeric(contributions_df['amount'], errors='coerce').fillna(0)
+                contributions_df['fee'] = pd.to_numeric(contributions_df['fee'], errors='coerce').fillna(0)
+                contributions_df['marks_covered'] = pd.to_numeric(contributions_df['marks_covered'], errors='coerce').fillna(0)
+            
+            return clients_df, contributions_df
     except Exception as e:
-        # If there's a DNS error (like in your first screenshot), show it here
-        st.error(f"📡 Database connection error. Check internet or Supabase status: {e}")
+        st.error(f"Failed to fetch data: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 def get_next_gen_id(reg_date):
-    """
-    Returns the first available ID (001, 002, etc.) for the chosen month/year.
-    Format: 001/MM/YY
-    """
+    """Generates a unique ID in format 001/MM/YY based on availability."""
     mm = reg_date.strftime('%m')
     yy = reg_date.strftime('%y')
     suffix = f"/{mm}/{yy}"
     
     try:
         with conn.session as s:
-            # Get all existing IDs for this specific month/year
             query = text("SELECT client_id FROM clients WHERE client_id LIKE :p")
             result = s.execute(query, {"p": f"%{suffix}"}).fetchall()
 
-            # If the month is empty, start at 001
             if not result:
                 return f"001{suffix}"
 
-            # Extract just the numeric prefixes and sort them
             existing_nums = sorted([int(row[0].split('/')[0]) for row in result])
             
-            # Find the first gap in the sequence
             next_num = 1
             for num in existing_nums:
                 if num == next_num:
                     next_num += 1
                 else:
-                    break # Found a gap! (e.g., 001, 003 -> gap is 002)
+                    break
             
             return f"{str(next_num).zfill(3)}{suffix}"
     except Exception as e:
         st.error(f"ID Generation Error: {e}")
         return None
 
-# --- 4. SECURITY GATE ---
+# --- 4. SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
@@ -87,73 +90,32 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 5. INITIALIZE DATA (Runs ONLY after login) ---
-with st.spinner("Fetching latest data..."):
-    clients, contributions = fetch_data()
+# --- 5. DATA INIT ---
+clients, contributions = fetch_data()
+combined_df = pd.merge(contributions, clients[['client_id', 'client_name']], on='client_name', how='left') if not clients.empty else contributions
 
-combined_df = pd.DataFrame()
-
-# Logic for combined data
-if not clients.empty and not contributions.empty:
-    try:
-        # We merge using 'client_name' because it exists in both DataFrames
-        combined_df = pd.merge(
-            contributions,
-            clients[['client_id', 'client_name']], # Pull ID from clients
-            on='client_name',                      # The shared key
-            how='left'
-        )
-            
-    except Exception as e:
-        st.warning(f"Merge error: {e}")
-        # If merge fails, fall back to just contributions so the app doesn't crash
-        combined_df = contributions
-
-# --- 6. NAVIGATION & PAGE ROUTING ---
+# --- 6. NAVIGATION ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    # ... (Your Dashboard code is fine) ...
     st.title("📊 Financial Overview")
-
     if not contributions.empty:
         total_vault = contributions['amount'].sum()
-        total_fees = contributions['fee'].sum()
-        net_liability = total_vault - total_fees
+        total_commissions = contributions['fee'].sum()
+        net_liability = total_vault - total_commissions 
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Vault", f"GHS {total_vault:,.2f}")
-        c2.metric("Total Commission", f"GHS {total_fees:,.2f}")
-        c3.metric("Net Liability", f"GHS {(total_vault - total_fees):,.2f}")
-        
-        st.divider()
-        st.subheader("🗓 Today's Cash Summary")
-        # Get today's date as a date object
-        today_date = datetime.now().date()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Vault (Cash)", f"GHS {total_vault:,.2f}")
+        m2.metric("Org. Commissions", f"GHS {total_commissions:,.2f}")
+        m3.metric("Net Client Liability", f"GHS {net_liability:,.2f}")
 
-        if not contributions.empty:
-        # Ensure the 'date' column is converted to datetime objects, then extract the date
-         contributions['date_only'] = pd.to_datetime(contributions['date']).dt.date
-         today_data = contributions[contributions['date_only'] == today_date]
-    
-         col_a, col_b = st.columns(2)
-    
-         # Calculate sums safely
-         inflow = today_data[today_data['amount'] > 0]['amount'].sum()
-          # We use abs() for the display so it looks clean (e.g., GHS 50.00 instead of GHS -50.00)
-         outflow = abs(today_data[today_data['amount'] < 0]['amount'].sum())
-    
-         col_a.metric("Today's Inflow", f"GHS {inflow:,.2f}")
-         col_b.metric("Today's Outflow", f"GHS {outflow:,.2f}")
-        else:
-            st.info("No data found to summarize.")
-        
-        col_a, col_b = st.columns(2)
-        col_a.metric("Today's Inflow", f"GHS {today_data[today_data['amount'] > 0]['amount'].sum():,.2f}")
-        col_b.metric("Today's Outflow", f"GHS {abs(today_data[today_data['amount'] < 0]['amount'].sum()):,.2f}")
+        chart_df = contributions.copy()
+        chart_df['Month'] = chart_df['date'].dt.strftime('%b %Y')
+        monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
+        st.bar_chart(data=monthly_profit, x='Month', y='fee')
     else:
-        st.info("No transaction data available yet.")
+        st.info("No records yet.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
@@ -162,85 +124,42 @@ elif choice == "💸 Transactions":
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row['daily_mark'])
         
-        # Calculate Current Status
         user_history = contributions[contributions['client_name'] == target]
         total_saved_ghs = user_history['amount'].sum()
-        # We calculate total marks by looking at the 'marks_covered' column
         total_marks_saved = user_history['marks_covered'].sum() 
         
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
+        can_save = True
+        db_amt, db_marks, db_fee = 0.0, 0, 0.0
 
         if ttype == "Deposit":
-            num_marks = st.number_input("Number of Marks (+1)", min_value=1, step=1)
-            final_amt = float(num_marks * d_mark)
-            st.info(f"Adding {num_marks} marks. Value: GHS {final_amt:,.2f}")
-        
+            num_marks = st.number_input("Number of Marks", min_value=1, step=1)
+            db_amt = float(num_marks * d_mark)
+            db_marks = num_marks
+            st.info(f"Value: GHS {db_amt:,.2f}")
         else:
-            # WITHDRAWAL LOGIC
-            requested_cash = st.number_input("Enter Cash to Withdraw (GHS)", min_value=0.0)
-            
-            # Calculate months/pages (Every 31 marks = 1 Month Commission)
-            # Use math.ceil if you take commission for partial months, 
-            # or floor if only for completed 31-day cycles.
-            import math
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
             total_months = math.ceil(total_marks_saved / 31)
-            total_commission_owed = total_months * d_mark
-            
-            total_deduction = requested_cash + total_commission_owed
-            
-            if requested_cash > 0:
-                if total_deduction > total_saved_ghs:
-                    st.error("⚠️ Insufficient Balance!")
-                    st.write(f"Client has: GHS {total_saved_ghs:,.2f}")
-                    st.write(f"Required (Cash + {total_months} mo. Commission): GHS {total_deduction:,.2f}")
-                    can_save = False
-                else:
-                    st.success("✅ Balance Sufficient")
-                    st.write(f"Deducting GHS {requested_cash:,.2f} + GHS {total_commission_owed:,.2f} Commission")
-                    can_save = True
-
-        # Save Button
-        if st.button("Confirm & Save"):
-           t_date = datetime.now()
-           if ttype == "Deposit":
-              db_amt = final_amt
-              db_marks = num_marks
-              db_fee = 0.0
-        else:
-             # can_save is defined in the withdrawal logic above
-            if not can_save: 
-             st.stop()
+            db_fee = total_months * d_mark
+            total_deduction = requested_cash + db_fee
             db_amt = -requested_cash
-            db_marks = 0 
-            db_fee = total_commission_owed
+            
+            if total_deduction > total_saved_ghs and requested_cash > 0:
+                st.error("⚠️ Insufficient Balance!")
+                can_save = False
+            else:
+                st.write(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Fee")
 
-    try:
-        with conn.session as s:
-            s.execute(
-                text("""INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
-                        VALUES (:n, :a, :d, :mc, :f)"""),
-                {"n": target, "a": db_amt, "d": t_date, "mc": db_marks, "f": db_fee}
-            )
-            s.commit()
-        
-        # Cleaned up success message (no f-string warning)
-        st.success(f"✅ Transaction recorded for {target}")
-        st.rerun()
-        # Receipt Layout
-        st.subheader("🧾 Transaction Receipt")
-        receipt_col1, receipt_col2 = st.columns(2)
-        with receipt_col1:
-            st.write("*RUCHANET DAILY SUSU*")
-            st.write(f"Client: {target}")
-            st.write(f"Type: {ttype}")
-        with receipt_col2:
-            st.write(f"Date: {t_date.strftime('%Y-%m-%d %H:%M')}")
-            st.write(f"Amount: GHS {abs(db_amt):,.2f}")
-            if db_fee > 0:
-                st.write(f"Comm. Paid: GHS {db_fee:,.2f}")
-        st.info("💡 You can take a screenshot of this receipt for the client.")
-    except Exception as e:
-                st.error(f"🚨 Database Error: {e}")
+        if st.button("Confirm & Save") and can_save:
+            try:
+                with conn.session as s:
+                    s.execute(text("INSERT INTO contributions (client_name, amount, date, marks_covered, fee) VALUES (:n, :a, :d, :mc, :f)"),
+                        {"n": target, "a": db_amt, "d": datetime.now(), "mc": db_marks, "f": db_fee})
+                    s.commit()
+                st.success(f"Transaction recorded for {target}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
     else:
         st.error("Please register clients in Admin Tools first.")
 

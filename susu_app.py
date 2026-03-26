@@ -14,7 +14,7 @@ def set_custom_style():
     <style>
     div.stButton > button:first-child { background-color: #FFD700 !important; color: #212529 !important; font-weight: bold !important; border: none !important; }
     [data-testid="stMetricValue"] { color: #FF4500 !important; font-size: 30px !important; }
-    [data-testid="stSidebar"] { background-color: #212529 !important; }
+    [data-testid="stSidebar"] { background-color: #212529 !important; color: #F8F9FA; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -28,13 +28,15 @@ conn = st.connection("postgresql", type="sql")
 def fetch_data():
     try:
         with conn.session as s:
-            clients_df = pd.DataFrame(s.execute(text("SELECT * FROM clients")).fetchall())
+            # Fetching as dictionaries often helps Pandas handle SQL types better
+            clients_df = pd.DataFrame(s.execute(text("SELECT * FROM clients")).mappings().all())
             contributions_df = pd.DataFrame(s.execute(
                 text("SELECT id, client_name, amount, date, marks_covered, fee FROM contributions")
-            ).fetchall())
+            ).mappings().all())
             
             if not contributions_df.empty:
-                contributions_df['date'] = pd.to_datetime(contributions_df['date'])
+                # FIX: Use format='ISO8601' or let pandas infer to handle the timestamps seen in your error
+                contributions_df['date'] = pd.to_datetime(contributions_df['date'], errors='coerce')
                 contributions_df['amount'] = pd.to_numeric(contributions_df['amount'], errors='coerce').fillna(0)
                 contributions_df['fee'] = pd.to_numeric(contributions_df['fee'], errors='coerce').fillna(0)
                 contributions_df['marks_covered'] = pd.to_numeric(contributions_df['marks_covered'], errors='coerce').fillna(0)
@@ -217,52 +219,45 @@ elif choice == "🛠 Admin Tools":
      st.subheader("👤 Register New Client")
      # 1. Capture Photo
      photo = st.camera_input("Take Client Photo (Required)")
-     with st.form("reg_form", clear_on_submit=True):
+    with st.form("reg_form", clear_on_submit=True):
          name = st.text_input("Full Name")
          phone = st.text_input("Phone Number")
          daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
          submit = st.form_submit_button("Register to Cloud")
          reg_date = st.date_input("Registration Date (For ID Generation)", value=datetime.now())
         
-         if st.form_submit_button("Register"):
-                gen_id = get_next_gen_id(reg_date)
-                if not name.strip() or not phone.strip() or photo is None:
-                 st.error("❌ All fields (Name, Phone, and Photo) are required")
-                else:
-                    try:
-                         # 2. GENERATE ID
-                        current_date_slug = datetime.now().strftime('%m%y') # e.g., '0326' for March 2026
-                        gen_id = get_next_gen_id(current_date_slug)
+         if submit: # Using the submit variable from your form_submit_button
+            if not name.strip() or not phone.strip() or photo is None:
+                  st.error("❌ All fields (Name, Phone, and Photo) are required")
+            else:
+                try:
+                    # 1. Generate ID using the date from the date_input
+                    gen_id = get_next_gen_id(reg_date)
 
-                         # 3. INITIALIZE STORAGE CLIENT
-                        from supabase import create_client
-                        url = st.secrets["supabase_url"]
-                        key = st.secrets["supabase_key"]
-                        sb_client = create_client(url, key)
+                   # 2. Supabase Upload
+                    from supabase import create_client
+                    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 
-                         # 4. UPLOAD PHOTO TO BUCKET
-                        file_path = f"{gen_id.replace('/', '_')}.jpg"
-                        sb_client.storage.from_("client-photos").upload(
-                        path=file_path,
-                        file=photo.getvalue(),
-                        file_options={"content-type": "image/jpeg"})
+                    file_path = f"{gen_id.replace('/', '_')}.jpg"
+                    sb_client.storage.from_("client-photos").upload(
+                    path=file_path,
+                    file=photo.getvalue(),
+                    file_options={"content-type": "image/jpeg"})
 
-                          # 5. GENERATE THE LINK (p_url)
-                        p_url = f"{url}/storage/v1/object/public/client-photos/{file_path}"
+                    # 3. Public URL
+                    p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
 
-                         # 6. SAVE RECORD TO DATABASE
-                        with conn.session as s:
-                            s.execute(
-                            text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                VALUES (:i, :n, :p, :d, :u)"""),
-                        {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
-                        s.commit()
-                        st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
-                        st.balloons()
-                
-                    except Exception as e:
-                         # This 'except' block is what clears the 11 errors!
-                        st.error(f"🚨 Registration Failed: {e}")
+                    # 4. Database Insert
+                    with conn.session as s:
+                     s.execute(text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                            VALUES (:i, :n, :p, :d, :u)"""),
+                     {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                     s.commit()
+                     st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
+                     st.balloons()
+                     st.rerun()
+                except Exception as e:
+                     st.error(f"🚨 Registration Failed: {e}")
     with t2:
         st.subheader("📧 Weekly Business Intelligence Report")
         if st.button("Generate & Send Professional Report"):

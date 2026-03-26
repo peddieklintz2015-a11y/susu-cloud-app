@@ -171,14 +171,16 @@ elif choice == "💸 Transactions":
         st.error("Please register clients in Admin Tools first.")
 
 elif choice == "📑 Digital Passbook":
-    # ... (Your Passbook code is fine) ...
     st.title("📑 Client Passbook")
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name to filter...")
+    
     if not clients.empty:
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
+        
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
+            
             col_a, col_b = st.columns([1, 2])
             with col_a:
                 photo_url = c_info.get('photo_url')
@@ -186,16 +188,21 @@ elif choice == "📑 Digital Passbook":
                     st.image(photo_url, width=230, caption=f"ID: {c_info['client_id']}")
                 else:
                     st.info("👤 No photo uploaded.")
+            
             with col_b:
-                user_history = contributions[contributions['client_name'] == target]
+                # USE THE MERGED DATA HERE
+                user_history = combined_df[combined_df['client_name'] == target]
                 current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
+                
                 st.subheader(f"Account: {target}")
                 st.metric("Current Savings Balance", f"GHS {current_balance:,.2f}")
                 st.write(f"📞 Phone: {c_info['phone']}")
                 st.write(f"💰 Daily Rate: GHS {c_info['daily_mark']:.2f}")
+            
             st.divider()
             if not user_history.empty:
                 display_df = user_history.sort_values(by='date', ascending=False).copy()
+                # Now you can show 'client_id' in the history table if you want!
                 st.dataframe(display_df[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
     else:
         st.error("No clients registered.")
@@ -220,7 +227,7 @@ elif choice == "🛠 Admin Tools":
             else:
                 try:
                     # 2. GENERATE ID
-                    gen_id = get_next_gen_id()
+                    gen_id = get_next_gen_id(datetime.now().strftime('%m%y'))
 
                  # 3. INITIALIZE STORAGE CLIENT
                     from supabase import create_client

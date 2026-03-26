@@ -227,37 +227,38 @@ elif choice == "🛠 Admin Tools":
          reg_date = st.date_input("Registration Date (For ID Generation)", value=datetime.now())
         
          if submit: # Using the submit variable from your form_submit_button
-            if not name.strip() or not phone.strip() or photo is None:
+                if not name.strip() or not phone.strip() or photo is None:
                   st.error("❌ All fields (Name, Phone, and Photo) are required")
-            else:
-                try:
-                    # 1. Generate ID using the date from the date_input
-                    gen_id = get_next_gen_id(reg_date)
+                else:
+                    try:
+                         # 1. Generate ID using the date from the date_input
+                        gen_id = get_next_gen_id(reg_date)
 
-                   # 2. Supabase Upload
-                    from supabase import create_client
-                    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+                         # 2. Supabase Upload
+                        from supabase import create_client
+                        sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 
-                    file_path = f"{gen_id.replace('/', '_')}.jpg"
-                    sb_client.storage.from_("client-photos").upload(
-                    path=file_path,
-                    file=photo.getvalue(),
-                    file_options={"content-type": "image/jpeg"})
+                        file_path = f"{gen_id.replace('/', '_')}.jpg"
+                        sb_client.storage.from_("client-photos").upload(
+                        path=file_path,
+                        file=photo.getvalue(),
+                        file_options={"content-type": "image/jpeg"})
 
-                    # 3. Public URL
-                    p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
+                        # 3. Public URL
+                        p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
 
-                    # 4. Database Insert
-                    with conn.session as s:
-                     s.execute(text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                         # 4. Database Insert
+                        with conn.session as s:
+                         s.execute(text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                             VALUES (:i, :n, :p, :d, :u)"""),
-                     {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
-                     s.commit()
-                     st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
-                     st.balloons()
-                     st.rerun()
-                except Exception as e:
+                        {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                        s.commit()
+                        st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
+                        st.balloons()
+                        st.rerun()
+                    except Exception as e:
                      st.error(f"🚨 Registration Failed: {e}")
+
     with t2:
         st.subheader("📧 Weekly Business Intelligence Report")
         if st.button("Generate & Send Professional Report"):
@@ -313,6 +314,7 @@ elif choice == "🛠 Admin Tools":
                 st.success("✅ Professional report sent to management!")
             except Exception as e:
                 st.error(f"Email Error: {e}")
+
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
@@ -347,6 +349,7 @@ elif choice == "🛠 Admin Tools":
                     st.rerun()
         elif admin_entry != "":
             st.error("❌ Incorrect Admin Password")
+            
     with t4:
      st.subheader("💰 Organization Commission Overview")
     

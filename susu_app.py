@@ -135,7 +135,7 @@ elif choice == "💸 Transactions":
         db_amt, db_marks, db_fee = 0.0, 0, 0.0
 
         if ttype == "Deposit":
-            num_marks = st.number_input("Number of Marks", min_value=1, step=1)
+            num_marks = st.number_input("Number of Marks", min_value=3, step=1)
             db_amt = float(num_marks * d_mark)
             db_marks = num_marks
             st.info(f"Value: GHS {db_amt:,.2f}")
@@ -350,8 +350,8 @@ elif choice == "🛠 Admin Tools":
     with t4:
      st.subheader("💰 Organization Commission Overview")
     
-    report_data = []
-    for index, row in clients.iterrows():
+     report_data = []
+     for index, row in clients.iterrows():
         name = row['client_name']
         rate = float(row['daily_mark'])
         
@@ -374,8 +374,8 @@ elif choice == "🛠 Admin Tools":
             "Pending Collection": max(0, pending_comm)
         })
     
-    comm_df = pd.DataFrame(report_data)
-    st.table(comm_df)
+     comm_df = pd.DataFrame(report_data)
+     st.table(comm_df)
     
-    total_to_collect = comm_df['Pending Collection'].sum()
-    st.metric("Total Commission to Collect on Withdrawal", f"GHS {total_to_collect:,.2f}")
+     total_to_collect = comm_df['Pending Collection'].sum()
+     st.metric("Total Commission to Collect on Withdrawal", f"GHS {total_to_collect:,.2f}")

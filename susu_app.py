@@ -72,8 +72,9 @@ def get_next_gen_id(reg_date):
             # Return formatted as 3 digits: "001/03/26"
             return f"{new_num:03d}/{mm_yy}"
     except Exception as e:
-        # Fallback if database is empty or fails
-        return f"001/{mm_yy}"
+    # Logging the error to the Streamlit UI clears the VS Code warning
+     st.error(f"ID Generation Error: {e}") 
+    return f"001/{mm_yy}"
 
 # --- 4. SECURITY ---
 def check_password():

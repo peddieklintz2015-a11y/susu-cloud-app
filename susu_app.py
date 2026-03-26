@@ -293,21 +293,58 @@ elif choice == "🛠 Admin Tools":
                  # This 'except' block is what clears the 11 errors!
                     st.error(f"🚨 Registration Failed: {e}")
     with t2:
-        st.subheader("Weekly Email Report")
-        if st.button("📧 Send Report"):
+        st.subheader("📧 Weekly Business Intelligence Report")
+        if st.button("Generate & Send Professional Report"):
             try:
+                # 1. Prepare Data Summary
+                total_savings = contributions['amount'].sum()
+                total_commissions = contributions['fee'].sum()
+                client_count = len(clients)
+                
+                # 2. Build HTML Body
+                html_content = f"""
+                <html>
+                    <body style="font-family: Arial, sans-serif; color: #333;">
+                        <div style="background-color: #212529; padding: 20px; text-align: center;">
+                            <h1 style="color: #FFD700; margin: 0;">RUCHANET DAILY SUSU</h1>
+                            <p style="color: #ffffff;">Weekly Financial Summary</p>
+                        </div>
+                        <div style="padding: 20px; border: 1px solid #ddd;">
+                            <h3>Executive Summary</h3>
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr style="background-color: #f8f9fa;">
+                                    <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Metric</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Value</th>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">Total Vault Balance</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; font-weight: bold;">GHS {total_savings:,.2f}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">Total Commissions (Fees)</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #28a745;">GHS {total_commissions:,.2f}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px; border: 1px solid #ddd;">Active Registered Clients</td>
+                                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">{client_count}</td>
+                                </tr>
+                            </table>
+                            <p style="margin-top: 20px; font-size: 12px; color: #888;">Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+                        </div>
+                    </body>
+                </html>
+                """
+
                 msg = EmailMessage()
-                msg['Subject'] = "Susu Weekly Update"
+                msg['Subject'] = f"📊 RUCHANET Report: {datetime.now().strftime('%d %b %Y')}"
                 msg['From'] = st.secrets["emails"]["sender_email"]
                 msg['To'] = st.secrets["emails"]["receiver_email"]
-                
-                html_content = f"<h2>RUCHANET DAILY SUSU</h2><p>Report Date: {datetime.now()}</p>"
                 msg.add_alternative(html_content, subtype='html')
 
                 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                     server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                     server.send_message(msg)
-                st.success("✅ Report sent!")
+                st.success("✅ Professional report sent to management!")
             except Exception as e:
                 st.error(f"Email Error: {e}")
     with t3:

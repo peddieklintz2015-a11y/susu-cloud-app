@@ -215,19 +215,20 @@ elif choice == "🛠 Admin Tools":
      st.subheader("👤 Register New Client")
      # 1. Capture Photo
      photo = st.camera_input("Take Client Photo (Required)")
-    with st.form("reg_form", clear_on_submit=True):
-        name = st.text_input("Full Name")
-        phone = st.text_input("Phone Number")
-        daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
-        submit = st.form_submit_button("Register to Cloud")
+     with st.form("reg_form", clear_on_submit=True):
+         name = st.text_input("Full Name")
+         phone = st.text_input("Phone Number")
+         daily = st.number_input("Daily Mark (GHS)", min_value=1.0, step=1.0)
+         submit = st.form_submit_button("Register to Cloud")
         
-        if submit:
+         if submit:
             if not name.strip() or not phone.strip() or photo is None:
               st.error("❌ All fields (Name, Phone, and Photo) are required")
             else:
                 try:
                     # 2. GENERATE ID
-                    gen_id = get_next_gen_id(datetime.now().strftime('%m%y'))
+                    current_date_slug = datetime.now().strftime('%m%y') # e.g., '0326' for March 2026
+                    gen_id = get_next_gen_id(current_date_slug)
 
                  # 3. INITIALIZE STORAGE CLIENT
                     from supabase import create_client

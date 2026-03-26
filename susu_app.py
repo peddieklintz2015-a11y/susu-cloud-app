@@ -117,8 +117,25 @@ if choice == "📊 Dashboard":
         
         st.divider()
         st.subheader("🗓 Today's Cash Summary")
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        today_data = contributions[contributions['date'].astype(str) == today_str]
+        # Get today's date as a date object
+        today_date = datetime.now().date()
+
+        if not contributions.empty:
+        # Ensure the 'date' column is converted to datetime objects, then extract the date
+         contributions['date_only'] = pd.to_datetime(contributions['date']).dt.date
+         today_data = contributions[contributions['date_only'] == today_date]
+    
+         col_a, col_b = st.columns(2)
+    
+         # Calculate sums safely
+         inflow = today_data[today_data['amount'] > 0]['amount'].sum()
+          # We use abs() for the display so it looks clean (e.g., GHS 50.00 instead of GHS -50.00)
+         outflow = abs(today_data[today_data['amount'] < 0]['amount'].sum())
+    
+         col_a.metric("Today's Inflow", f"GHS {inflow:,.2f}")
+         col_b.metric("Today's Outflow", f"GHS {outflow:,.2f}")
+        else:
+            st.info("No data found to summarize.")
         
         col_a, col_b = st.columns(2)
         col_a.metric("Today's Inflow", f"GHS {today_data[today_data['amount'] > 0]['amount'].sum():,.2f}")
@@ -146,27 +163,43 @@ elif choice == "💸 Transactions":
             is_old = st.checkbox("📍 Migration Entry")
 
         if st.button("Confirm & Save"):
+            # 1. Get current month string (e.g., '2026-03')
             curr_month = t_date.strftime('%Y-%m')
-            has_paid = not contributions[
+            
+            # 2. Check if this client has already made a deposit this month
+            already_deposited = not contributions[
                 (contributions['client_name'] == target) & 
                 (contributions['date'].astype(str).str.startswith(curr_month)) &
                 (contributions['amount'] > 0)
             ].empty
             
-            fee_amt = d_mark if (not has_paid and ttype == "Deposit" and not is_old) else 0.0
-            final_val = calc_amt if ttype == "Deposit" else -calc_amt
+            # 3. Fee Logic: Charge d_mark ONLY on the first DEPOSIT of the month
+            # No fees for withdrawals or migration entries
+            fee_amt = 0.0
+            if ttype == "Deposit" and not already_deposited and not is_old:
+                fee_amt = float(d_mark)
+
+            # 4. Final Value: Positive for Deposit, Negative for Withdrawal
+            final_val = float(calc_amt) if ttype == "Deposit" else -float(calc_amt)
 
             try:
                 with conn.session as s:
                     s.execute(
-                        text("INSERT INTO contributions (client_name, amount, date, marks_covered, fee) VALUES (:n, :a, :d, :mc, :f)"),
-                        {"n": target, "a": final_val, "d": t_date, "mc": int(num_marks), "f": fee_amt}
+                        text("""INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
+                                VALUES (:n, :a, :d, :mc, :f)"""),
+                        {
+                            "n": target, 
+                            "a": final_val, 
+                            "d": t_date, 
+                            "mc": int(num_marks), 
+                            "f": fee_amt
+                        }
                     )
                     s.commit()
-                st.success(f"✅ Recorded GHS {calc_amt} for {target}")
+                st.success(f"✅ {ttype} of GHS {calc_amt:,.2f} recorded for {target}")
                 st.rerun()
             except Exception as e:
-                st.error(f"Database Error: {e}")
+                st.error(f"🚨 Database Error: {e}")
     else:
         st.error("Please register clients in Admin Tools first.")
 

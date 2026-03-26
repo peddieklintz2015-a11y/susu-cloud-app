@@ -216,11 +216,11 @@ elif choice == "🛠 Admin Tools":
     t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Commission Tracker" ])
     
     with t1:
-     st.subheader("👤 Register New Client")
-    # 1. Capture Photo
-    photo = st.camera_input("Take Client Photo (Required)")
+        st.subheader("👤 Register New Client")
+             # 1. Capture Photo
+        photo = st.camera_input("Take Client Photo (Required)")
     
-    # FIX: Form must be indented under t1
+        # FIX: Form must be indented under t1
     with st.form("reg_form", clear_on_submit=True):
         name = st.text_input("Full Name")
         phone = st.text_input("Phone Number")

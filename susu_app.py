@@ -329,8 +329,8 @@ elif choice == "📑 Digital Passbook":
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
     
-    # FIX: Initialize the tabs properly
-    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage"])
+    # FIX: This line defines t4. Ensure it exists before "with t4:"
+    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile"])
     
     with t1:
         st.subheader("👤 Register New Client")
@@ -436,87 +436,89 @@ elif choice == "🛠 Admin Tools":
                         st.rerun()
 
 with t4:
-    st.subheader("⚙️ Secure Client Profile Manager")
-    st.error("❗ **CRITICAL AREA**: Deletion removes the client, photo, and history permanently.")
+        st.subheader("⚙️ Secure Client Profile Manager")
+        st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
 
-    if not clients.empty:
-        # Search Bar
-        search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
-        
-        filtered = clients[
-            clients['client_name'].str.contains(search_query, case=False) | 
-            clients['client_id'].str.contains(search_query, case=False)
-        ]
+        if not clients.empty:
+            # Search Bar
+            search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
+            
+            filtered = clients[
+                clients['client_name'].str.contains(search_query, case=False) | 
+                clients['client_id'].str.contains(search_query, case=False)
+            ]
 
-        if not filtered.empty:
-            selected_name = st.selectbox("Select Profile:", filtered['client_name'])
-            c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-            target_id = c_data['client_id']
-            
-            # Calculate Balance
-            u_history = contributions[contributions['client_name'] == selected_name]
-            final_balance = u_history['amount'].sum()
-            
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                if c_data['photo_url']:
-                    st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
-            with col2:
-                st.write(f"**Name:** {c_data['client_name']}")
-                st.write(f"**Phone:** {c_data['phone']}")
-                st.write(f"**Payout Due:** GHS {final_balance:,.2f}")
-
-            st.markdown("---")
-            
-            # Triple Lock System
-            confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
-            
-            if confirm_check:
-                admin_pass = st.text_input("🔐 Admin Password Required", type="password")
+            if not filtered.empty:
+                selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+                c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+                target_id = c_data['client_id']
                 
-                if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                    if admin_pass == st.secrets["passwords"]["admin_password"]:
-                        try:
-                            # 1. Storage Cleanup
-                            from supabase import create_client
-                            sb = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-                            file_path = f"{target_id.replace('/', '_')}.jpg"
-                            try:
-                                sb.storage.from_("client-photos").remove([file_path])
-                            except Exception:
-                                pass 
+                # Calculate Balance
+                u_history = contributions[contributions['client_name'] == selected_name]
+                final_balance = u_history['amount'].sum()
+                
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    if c_data['photo_url']:
+                        st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
+                with col2:
+                    st.write(f"*Name:* {c_data['client_name']}")
+                    st.write(f"*Phone:* {c_data['phone']}")
+                    st.write(f"*Payout Due:* GHS {final_balance:,.2f}")
 
-                            # 2. Database Cleanup
-                            with conn.session as s:
-                                s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
-                                s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
-                                s.commit()
-
-                            # 3. Success Toast
-                            st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
-                            
-                            # 4. Audit Email
+                st.markdown("---")
+                
+                # Triple Lock System
+                confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
+                
+                if confirm_check:
+                    admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
+                    
+                    if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                        if admin_pass == st.secrets["passwords"]["admin_password"]:
                             try:
-                                audit_msg = EmailMessage()
-                                audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
-                                audit_msg['From'] = st.secrets["emails"]["sender_email"]
-                                audit_msg['To'] = st.secrets["emails"]["receiver_email"]
-                                audit_msg.set_content(f"Deleted: {selected_name}\nID: {target_id}\nPayout: GHS {final_balance}\nTime: {datetime.now()}")
+                                # 1. Storage Cleanup
+                                from supabase import create_client
+                                sb = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+                                # Use underscore to match how we saved it
+                                file_path = f"{target_id.replace('/', '_')}.jpg"
+                                try:
+                                    sb.storage.from_("client-photos").remove([file_path])
+                                except Exception:
+                                    pass 
+
+                                # 2. Database Cleanup
+                                with conn.session as s:
+                                    s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                    s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                    s.commit()
+
+                                # 3. Success Feedback
+                                st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
                                 
-                                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                                    server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
-                                    server.send_message(audit_msg)
-                            except Exception:
-                                pass
+                                # 4. Audit Email
+                                try:
+                                    audit_msg = EmailMessage()
+                                    audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
+                                    audit_msg['From'] = st.secrets["emails"]["sender_email"]
+                                    audit_msg['To'] = st.secrets["emails"]["receiver_email"]
+                                    # FIX: Use datetime.now() because of your specific import
+                                    audit_msg.set_content(f"Deleted: {selected_name}\nID: {target_id}\nPayout: GHS {final_balance}\nTime: {datetime.now()}")
+                                    
+                                    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                                        server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
+                                        server.send_message(audit_msg)
+                                except Exception:
+                                    pass
 
-                            time.sleep(5)
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"🚨 Wipe Failed: {e}")
-                    else:
-                        st.error("❌ Incorrect Password.")
+                                time.sleep(2)
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"🚨 Wipe Failed: {e}")
+                        else:
+                            st.error("❌ Incorrect Password.")
+            else:
+                st.info("No matching profiles.")
         else:
-            st.info("No matching profiles.")
-    else:
-        st.info("Database empty.")
+            st.info("Database empty.")

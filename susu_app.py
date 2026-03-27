@@ -163,7 +163,7 @@ elif choice == "💸 Transactions":
             db_marks = num_marks
             st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
         else:
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1)
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0,)
             
             # --- NEW: MATH.CEIL FEE CALCULATION ---
             # Charge 1 mark for every month (or part of a month) they have saved

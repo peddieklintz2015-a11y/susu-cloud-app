@@ -226,6 +226,61 @@ elif choice == "💸 Transactions":
         st.error("Please register clients in Admin Tools first.")
 
 elif choice == "📑 Digital Passbook":
+    # 1. Get the current date for the print header
+    current_date = datetime.datetime.now().strftime("%d %B, %Y")
+    
+    # 2. Your GitHub Raw Link (Replace this with your actual raw URL)
+    logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/blob/206df565d37304776324272e689e1611701bf146/logo.jpeg"
+    
+    # --- Print-Only Logo, Header, and Date ---
+    st.markdown(f"""
+        <style>
+        /* Hidden on the website */
+        .print-header {{
+            display: none;
+        }}
+
+        /* Visible only when printing */
+        @media print {{
+            .print-header {{
+                display: flex !important;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                margin-bottom: 30px;
+                border-bottom: 2px solid #333;
+                padding-bottom: 10px;
+            }}
+            .print-header img {{
+                width: 100px;
+                margin-bottom: 10px;
+            }}
+            .print-header h1 {{
+                margin: 0;
+                font-size: 24px;
+            }}
+            .print-header p {{
+                margin: 5px 0;
+                font-size: 14px;
+                color: #555;
+            }}
+            /* Hides the Streamlit sidebar and UI buttons during print */
+            section[data-testid="stSidebar"], 
+            .stActionButton, 
+            header {{
+                display: none !important;
+            }}
+        }}
+        </style>
+        
+        <div class="print-header">
+            <img src="{logo_url}">
+            <h1>RUCHANET DAILY SUSU</h1>
+            <p><strong>Official Client Statement</strong></p>
+            <p>Generated on: {current_date}</p>
+        </div>
+    """, unsafe_allow_html=True)
     st.title("📑 Client Passbook")
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     

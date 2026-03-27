@@ -362,7 +362,7 @@ elif choice == "🛠 Admin Tools":
 
     with t2:
         st.subheader("📊 Weekly Executive Intelligence")
-        if st.button("Generate & Send Weekly Report"):
+        if st.button("Generate & Send Comprehensive Weekly Report"):
             try:
                 # 1. Calculate Week Range (Monday to Sunday)
                 today = datetime.now().date()

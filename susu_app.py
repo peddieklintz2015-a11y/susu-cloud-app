@@ -227,20 +227,17 @@ elif choice == "💸 Transactions":
 
 elif choice == "📑 Digital Passbook":
     # 1. Get the current date for the print header
-    current_date = datetime.datetime.now().strftime("%d %B, %Y")
+    # FIX: Changed from datetime.datetime.now() to datetime.now()
+    current_date = datetime.now().strftime("%d %B, %Y")
     
-    # 2. Your GitHub Raw Link (Replace this with your actual raw URL)
-    logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/blob/206df565d37304776324272e689e1611701bf146/logo.jpeg"
+    # 2. Corrected GitHub RAW Link
+    # FIX: Changed 'blob' to 'raw' and removed the commit hash for a cleaner link
+    logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/main/logo.jpeg"
     
     # --- Print-Only Logo, Header, and Date ---
     st.markdown(f"""
         <style>
-        /* Hidden on the website */
-        .print-header {{
-            display: none;
-        }}
-
-        /* Visible only when printing */
+        .print-header {{ display: none; }}
         @media print {{
             .print-header {{
                 display: flex !important;
@@ -252,28 +249,12 @@ elif choice == "📑 Digital Passbook":
                 border-bottom: 2px solid #333;
                 padding-bottom: 10px;
             }}
-            .print-header img {{
-                width: 100px;
-                margin-bottom: 10px;
-            }}
-            .print-header h1 {{
-                margin: 0;
-                font-size: 24px;
-            }}
-            .print-header p {{
-                margin: 5px 0;
-                font-size: 14px;
-                color: #555;
-            }}
-            /* Hides the Streamlit sidebar and UI buttons during print */
-            section[data-testid="stSidebar"], 
-            .stActionButton, 
-            header {{
-                display: none !important;
-            }}
+            .print-header img {{ width: 100px; margin-bottom: 10px; }}
+            .print-header h1 {{ margin: 0; font-size: 24px; }}
+            .print-header p {{ margin: 5px 0; font-size: 14px; color: #555; }}
+            section[data-testid="stSidebar"], .stActionButton, header {{ display: none !important; }}
         }}
         </style>
-        
         <div class="print-header">
             <img src="{logo_url}">
             <h1>RUCHANET DAILY SUSU</h1>
@@ -281,6 +262,7 @@ elif choice == "📑 Digital Passbook":
             <p>Generated on: {current_date}</p>
         </div>
     """, unsafe_allow_html=True)
+
     st.title("📑 Client Passbook")
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
@@ -305,54 +287,24 @@ elif choice == "📑 Digital Passbook":
                 m1, m2 = st.columns(2)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Marks", f"{total_marks}")
-                # Progress bar based on a 31-day cycle
                 st.progress(min((total_marks % 31) / 31, 1.0))
 
             st.divider()
-            
-            # Action Row: WhatsApp and Browser Print
             col_s1, col_s2 = st.columns(2)
-            
             with col_s1:
-                # WhatsApp Logic
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
                 wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
-                st.markdown(
-                    f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">'
-                    f'<button style="background-color: #25D366; color: white; border: none; padding: 10px; '
-                    f'border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">'
-                    f'🟢 Send via WhatsApp</button></a>', 
-                    unsafe_allow_html=True
-                )
+                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 Send via WhatsApp</button></a>', unsafe_allow_html=True)
             
             with col_s2:
-                # Browser Print Logic (Replaces the PDF function)
-                st.markdown("""
-                    <button onclick="window.print()" style="
-                        background-color: #007bff; 
-                        color: white; 
-                        border: none; 
-                        padding: 10px; 
-                        border-radius: 8px; 
-                        width: 100%; 
-                        cursor: pointer; 
-                        font-weight: bold;">
-                        🖨️ Print / Save PDF
-                    </button>
-                    """, unsafe_allow_html=True)
+                st.markdown("""<button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🖨️ Print / Save PDF</button>""", unsafe_allow_html=True)
 
             st.divider()
-            
-            # Display Transaction History Table
             if not user_history.empty:
                 st.write("### 📝 History")
                 user_h_display = user_history.copy()
-                # Formatting date for readability in the table
                 user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(
-                    user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], 
-                    use_container_width=True
-                )
+                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
             else:
                 st.info("No transaction history yet.")
         else:

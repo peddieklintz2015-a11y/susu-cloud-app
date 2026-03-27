@@ -8,6 +8,14 @@ from sqlalchemy import text
 from email.message import EmailMessage
 from supabase import create_client
 
+# --- 0. MAINTENANCE MODE (SECRET CONTROL) ---
+# This stops the app immediately if the secret is set to true
+if st.secrets["app_settings"]["maintenance_mode"]:
+    st.title("🚧 System Maintenance")
+    st.warning("RUCHANET DAILY SUSU is currently undergoing scheduled updates.")
+    st.info("We'll be back online shortly! 🙏")
+    st.stop()
+
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 

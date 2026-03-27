@@ -361,59 +361,82 @@ elif choice == "🛠 Admin Tools":
                         st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
-        st.subheader("📧 Detailed Business Intelligence Report")
-        if st.button("Generate & Send Comprehensive Report"):
+        st.subheader("📊 Weekly Executive Intelligence")
+        if st.button("Generate & Send Weekly Report"):
             try:
-                # 1. Gather Intelligence
-                total_vault = contributions['amount'].sum()
-                total_commissions = contributions['fee'].sum()
-                
-                # Filter for Today's transactions
+                # 1. Calculate Week Range (Monday to Sunday)
                 today = datetime.now().date()
-                today_data = contributions[contributions['date'].dt.date == today]
+                start_of_week = today - pd.Timedelta(days=today.weekday())  # Last Monday
+                end_of_week = start_of_week + pd.Timedelta(days=6)         # Next Sunday
                 
-                today_deposits = today_data[today_data['amount'] > 0]['amount'].sum()
-                today_withdrawals = abs(today_data[today_data['amount'] < 0]['amount'].sum())
-                today_fees = today_data['fee'].sum()
+                # 2. Filter Data for this week
+                week_data = contributions[
+                    (contributions['date'].dt.date >= start_of_week) & 
+                    (contributions['date'].dt.date <= end_of_week)
+                ].copy()
                 
-                # Get top 5 clients by balance
-                client_balances = contributions.groupby('client_name')['amount'].sum().sort_values(ascending=False).head(5)
-                top_clients_html = "".join([f"<li>{name}: GHS {bal:,.2f}</li>" for name, bal in client_balances.items()])
+                # 3. Daily Summary Table Construction
+                week_data['Day'] = week_data['date'].dt.strftime('%A')
+                # Ensure the order is Monday to Sunday
+                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                
+                summary = week_data.groupby('Day').agg({
+                    'amount': [lambda x: x[x > 0].sum(), lambda x: abs(x[x < 0].sum())],
+                    'fee': 'sum'
+                }).reindex(day_order).fillna(0)
+                summary.columns = ['Deposits', 'Withdrawals', 'Commissions']
 
-                # 2. Build the detailed HTML Email
+                # Build HTML Table rows
+                table_rows = ""
+                for day, row in summary.iterrows():
+                    bg_color = "#f9f9f9" if day in ['Saturday', 'Sunday'] else "#ffffff"
+                    table_rows += f"""
+                    <tr style="background-color: {bg_color}; border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;"><b>{day}</b></td>
+                        <td style="padding: 10px; text-align: right;">{row['Deposits']:,.2f}</td>
+                        <td style="padding: 10px; text-align: right;">{row['Withdrawals']:,.2f}</td>
+                        <td style="padding: 10px; text-align: right; color: #27ae60;">{row['Commissions']:,.2f}</td>
+                    </tr>"""
+
+                # 4. Totals
+                total_vault = contributions['amount'].sum()
+                weekly_commissions = summary['Commissions'].sum()
+
+                # 5. Build HTML Email
                 html_content = f"""
                 <html>
-                    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6;">
-                        <div style="background-color: #212529; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: #FFD700; margin: 0; letter-spacing: 2px;">RUCHANET DAILY SUSU</h1>
-                            <p style="color: #ffffff; margin-top: 5px;">Executive Intelligence Report</p>
+                    <body style="font-family: Arial, sans-serif; color: #333;">
+                        <div style="background-color: #212529; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
+                            <h1 style="color: #FFD700; margin: 0;">RUCHANET WEEKLY SUMMARY</h1>
+                            <p style="color: #fff; margin: 5px 0 0 0;">Week: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b, %Y')}</p>
                         </div>
                         
-                        <div style="padding: 20px; border: 1px solid #ddd; border-top: none;">
-                            <h2 style="color: #2c3e50; border-bottom: 2px solid #FFD700; padding-bottom: 10px;">📅 Today's Summary ({today.strftime('%d %b, %Y')})</h2>
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <tr><td>📥 <b>Total Deposits:</b></td><td style="text-align: right;">GHS {today_deposits:,.2f}</td></tr>
-                                <tr><td>📤 <b>Total Withdrawals:</b></td><td style="text-align: right;">GHS {today_withdrawals:,.2f}</td></tr>
-                                <tr><td>💰 <b>Daily Commissions:</b></td><td style="text-align: right;">GHS {today_fees:,.2f}</td></tr>
+                        <div style="padding: 20px; border: 1px solid #ddd;">
+                            <h3>📈 Weekly Cash Flow</h3>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                                <thead style="background-color: #f2f2f2;">
+                                    <tr>
+                                        <th style="padding: 10px; text-align: left;">Day</th>
+                                        <th style="padding: 10px; text-align: right;">Deposits (GHS)</th>
+                                        <th style="padding: 10px; text-align: right;">Withdr. (GHS)</th>
+                                        <th style="padding: 10px; text-align: right;">Comm. (GHS)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>{table_rows}</tbody>
                             </table>
 
-                            <h2 style="color: #2c3e50; border-bottom: 2px solid #FFD700; padding-bottom: 10px; margin-top: 30px;">🏦 Master Vault Status</h2>
-                            <p style="font-size: 18px;"><b>Current Cash in Vault:</b> <span style="color: #27ae60;">GHS {total_vault:,.2f}</span></p>
-                            <p style="font-size: 18px;"><b>Total Earned Fees:</b> <span style="color: #2980b9;">GHS {total_commissions:,.2f}</span></p>
-                            
-                            <h2 style="color: #2c3e50; border-bottom: 2px solid #FFD700; padding-bottom: 10px; margin-top: 30px;">🏆 Top 5 Clients (By Savings)</h2>
-                            <ul>{top_clients_html}</ul>
-
-                            <div style="margin-top: 40px; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
-                                This is an automated secure report generated by the Ruchanet Cloud System.
+                            <div style="margin-top: 25px; background: #f4f4f4; padding: 15px; border-radius: 5px;">
+                                <p style="margin: 5px 0;"><b>Total Weekly Commission:</b> GHS {weekly_commissions:,.2f}</p>
+                                <p style="margin: 5px 0; font-size: 18px; color: #2c3e50;"><b>Final Vault Balance: GHS {total_vault:,.2f}</b></p>
                             </div>
                         </div>
+                        <p style="font-size: 11px; color: #999; text-align: center;">Generated via Ruchanet Cloud Admin Tool</p>
                     </body>
                 </html>
                 """
 
                 msg = EmailMessage()
-                msg['Subject'] = f"📊 RUCHANET BI REPORT: {today.strftime('%d %b %Y')}"
+                msg['Subject'] = f"📊 Weekly BI Report: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b')}"
                 msg['From'] = st.secrets["emails"]["sender_email"]
                 msg['To'] = st.secrets["emails"]["receiver_email"]
                 msg.add_alternative(html_content, subtype='html')
@@ -421,9 +444,10 @@ elif choice == "🛠 Admin Tools":
                 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                     server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                     server.send_message(msg)
-                st.success("✅ Detailed Intelligence Report sent!")
+                st.success(f"✅ Weekly report for {start_of_week.strftime('%d %b')} sent!")
+                
             except Exception as e:
-                st.error(f"Failed to generate full report: {e}")
+                st.error(f"Failed to generate weekly report: {e}")
 
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")

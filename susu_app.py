@@ -154,7 +154,7 @@ elif choice == "💸 Transactions":
             db_marks = num_marks
             st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
         else:
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1)
             
             # --- NEW: MATH.CEIL FEE CALCULATION ---
             # Charge 1 mark for every month (or part of a month) they have saved
@@ -226,12 +226,10 @@ elif choice == "💸 Transactions":
         st.error("Please register clients in Admin Tools first.")
 
 elif choice == "📑 Digital Passbook":
-    # 1. Get the current date for the print header
-    # FIX: Changed from datetime.datetime.now() to datetime.now()
+    # FIX: Use datetime.now() (not datetime.datetime.now()) due to your import style
     current_date = datetime.now().strftime("%d %B, %Y")
     
-    # 2. Corrected GitHub RAW Link
-    # FIX: Changed 'blob' to 'raw' and removed the commit hash for a cleaner link
+    # FIX: Corrected RAW link for GitHub (Replaced 'blob' with 'raw')
     logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/main/logo.jpeg"
     
     # --- Print-Only Logo, Header, and Date ---
@@ -252,9 +250,11 @@ elif choice == "📑 Digital Passbook":
             .print-header img {{ width: 100px; margin-bottom: 10px; }}
             .print-header h1 {{ margin: 0; font-size: 24px; }}
             .print-header p {{ margin: 5px 0; font-size: 14px; color: #555; }}
+            /* Hides UI elements during print */
             section[data-testid="stSidebar"], .stActionButton, header {{ display: none !important; }}
         }}
         </style>
+        
         <div class="print-header">
             <img src="{logo_url}">
             <h1>RUCHANET DAILY SUSU</h1>
@@ -290,16 +290,33 @@ elif choice == "📑 Digital Passbook":
                 st.progress(min((total_marks % 31) / 31, 1.0))
 
             st.divider()
+            
+            # Action Row
             col_s1, col_s2 = st.columns(2)
+            
             with col_s1:
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
                 wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
                 st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 Send via WhatsApp</button></a>', unsafe_allow_html=True)
             
             with col_s2:
-                st.markdown("""<button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🖨️ Print / Save PDF</button>""", unsafe_allow_html=True)
+                # Browser Print Button
+                st.markdown("""
+                    <button onclick="window.print()" style="
+                        background-color: #007bff; 
+                        color: white; 
+                        border: none; 
+                        padding: 10px; 
+                        border-radius: 8px; 
+                        width: 100%; 
+                        cursor: pointer; 
+                        font-weight: bold;">
+                        🖨️ Print / Save PDF
+                    </button>
+                    """, unsafe_allow_html=True)
 
             st.divider()
+            
             if not user_history.empty:
                 st.write("### 📝 History")
                 user_h_display = user_history.copy()
@@ -307,30 +324,24 @@ elif choice == "📑 Digital Passbook":
                 st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
             else:
                 st.info("No transaction history yet.")
-        else:
-            st.info("No matching profiles.")
-    else:
-        st.error("No clients registered.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
-    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage " ])
+    
+    # FIX: Initialize the tabs properly
+    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage"])
     
     with t1:
         st.subheader("👤 Register New Client")
-        
-        # 1. Capture Photo
         photo = st.camera_input("Take Client Photo (Required)")
     
-        # FIX: Now correctly indented INSIDE 'with t1:'
         with st.form("reg_form", clear_on_submit=True):
             name = st.text_input("Full Name")
             phone = st.text_input("Phone Number")
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
             reg_date = st.date_input("Registration Date", value=datetime.now())
             
-            # Use your smart new ID function to show a preview
             suggested_id = get_next_gen_id(reg_date)
             st.info(f"Next Available ID: {suggested_id}")
             
@@ -341,10 +352,7 @@ elif choice == "🛠 Admin Tools":
                     st.error("❌ All fields (Name, Phone, and Photo) are required")
                 else:
                     try:
-                        # 1. Generate ID
                         gen_id = get_next_gen_id(reg_date)
-
-                        # 2. Supabase Upload
                         from supabase import create_client
                         sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 
@@ -355,10 +363,8 @@ elif choice == "🛠 Admin Tools":
                             file_options={"content-type": "image/jpeg"}
                         )
 
-                        # 3. Public URL
                         p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
 
-                        # 4. Database Insert
                         with conn.session as s:
                             s.execute(text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                             VALUES (:i, :n, :p, :d, :u)"""),
@@ -366,105 +372,68 @@ elif choice == "🛠 Admin Tools":
                             s.commit()
                         
                         st.success(f"✅ Registered {name} successfully!")
-                        st.toast(f"👤 {name} registered to cloud!", icon="✅")
                         st.balloons()
-                        time.sleep(3) # Give them a second to see the toast
+                        time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
 
-with t2:
-    st.subheader("📧 Weekly Business Intelligence Report")
-    if st.button("Generate & Send Professional Report"):
-        try:
-            # 1. Prepare Data Summary
-            total_savings = contributions['amount'].sum()
-            total_commissions = contributions['fee'].sum()
-            client_count = len(clients)
-            
-            # 2. Build HTML Body
-            html_content = f"""
-            <html>
-                <body style="font-family: Arial, sans-serif; color: #333;">
-                    <div style="background-color: #212529; padding: 20px; text-align: center;">
-                        <h1 style="color: #FFD700; margin: 0;">RUCHANET DAILY SUSU</h1>
-                        <p style="color: #ffffff;">Weekly Financial Summary</p>
-                    </div>
-                    <div style="padding: 20px; border: 1px solid #ddd;">
-                        <h3>Executive Summary</h3>
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tr style="background-color: #f8f9fa;">
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Metric</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Value</th>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;">Total Vault Balance</td>
-                                <td style="padding: 10px; border: 1px solid #ddd; text-align: right; font-weight: bold;">GHS {total_savings:,.2f}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;">Total Commissions (Fees)</td>
-                                <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #28a745;">GHS {total_commissions:,.2f}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px; border: 1px solid #ddd;">Active Registered Clients</td>
-                                <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">{client_count}</td>
-                            </tr>
-                        </table>
-                        <p style="margin-top: 20px; font-size: 12px; color: #888;">Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-                    </div>
-                </body>
-            </html>
-            """
-
-            msg = EmailMessage()
-            msg['Subject'] = f"📊 RUCHANET Report: {datetime.now().strftime('%d %b %Y')}"
-            msg['From'] = st.secrets["emails"]["sender_email"]
-            msg['To'] = st.secrets["emails"]["receiver_email"]
-            msg.add_alternative(html_content, subtype='html')
-
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
-                server.send_message(msg)
-            st.success("✅ Professional report sent to management!")
-        except Exception as e:
-            st.error(f"Email Error: {e}")
-
-with t3:
-    st.subheader("🛑 Restricted Data Cleanup")
-    admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
-    
-    if admin_entry == st.secrets["passwords"]["admin_password"]:
-        if not contributions.empty:
-            search_term = st.text_input("Filter by Client Name")
-            f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
-            
-            if not f_df.empty:
-                # Create options list
-                options_list = f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1).tolist()
-                to_del = st.selectbox("Select entry to remove", options=options_list)
+    with t2:
+        st.subheader("📧 Weekly Business Intelligence Report")
+        if st.button("Generate & Send Professional Report"):
+            try:
+                total_savings = contributions['amount'].sum()
+                total_commissions = contributions['fee'].sum()
+                client_count = len(clients)
                 
-                if st.button("🗑️ Permanent Delete"):
-                    st.session_state['undo_info'] = to_del
-                    parts = to_del.split(" | ")
-                    with conn.session as s:
-                        s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
-                                 {"n": parts[1], "d": parts[0]})
-                        s.commit()
-                    st.success("Deleted. Rerunning...")
-                    st.rerun()
+                html_content = f"""
+                <html>
+                    <body style="font-family: Arial, sans-serif; color: #333;">
+                        <div style="background-color: #212529; padding: 20px; text-align: center;">
+                            <h1 style="color: #FFD700; margin: 0;">RUCHANET DAILY SUSU</h1>
+                        </div>
+                        <div style="padding: 20px; border: 1px solid #ddd;">
+                            <h3>Executive Summary</h3>
+                            <p>Vault Balance: GHS {total_savings:,.2f}</p>
+                            <p>Commissions: GHS {total_commissions:,.2f}</p>
+                            <p>Total Clients: {client_count}</p>
+                        </div>
+                    </body>
+                </html>
+                """
+                msg = EmailMessage()
+                msg['Subject'] = f"📊 RUCHANET Report: {datetime.now().strftime('%d %b %Y')}"
+                msg['From'] = st.secrets["emails"]["sender_email"]
+                msg['To'] = st.secrets["emails"]["receiver_email"]
+                msg.add_alternative(html_content, subtype='html')
 
-        if 'undo_info' in st.session_state:
-            if st.button("⏪ Undo Deletion"):
-                u = st.session_state['undo_info'].split(" | ")
-                with conn.session as s:
-                    s.execute(text("INSERT INTO contributions (client_name, amount, date) VALUES (:n, :a, :d)"),
-                              {"n": u[1], "a": float(u[2].replace("GHS ", "").replace(",", "")), "d": u[0]})
-                    s.commit()
-                del st.session_state['undo_info']
-                st.success("Restored!")
-                st.rerun()
-    elif admin_entry != "":
-        st.error("❌ Incorrect Admin Password")
+                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                    server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
+                    server.send_message(msg)
+                st.success("✅ Report sent to management!")
+            except Exception as e:
+                st.error(f"Email Error: {e}")
+
+    with t3:
+        st.subheader("🛑 Restricted Data Cleanup")
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+        
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
+            if not contributions.empty:
+                search_term = st.text_input("Filter by Client Name")
+                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
+                
+                if not f_df.empty:
+                    options_list = f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1).tolist()
+                    to_del = st.selectbox("Select entry to remove", options=options_list)
+                    
+                    if st.button("🗑️ Permanent Delete"):
+                        parts = to_del.split(" | ")
+                        with conn.session as s:
+                            s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
+                                     {"n": parts[1], "d": parts[0]})
+                            s.commit()
+                        st.rerun()
 
 with t4:
     st.subheader("⚙️ Secure Client Profile Manager")
@@ -540,7 +509,7 @@ with t4:
                             except Exception:
                                 pass
 
-                            time.sleep(2)
+                            time.sleep(5)
                             st.rerun()
                             
                         except Exception as e:

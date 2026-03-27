@@ -3,12 +3,9 @@ import pandas as pd
 import time
 import math
 import smtplib
-import io
-import requests
 from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
-from fpdf import FPDF
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
@@ -81,67 +78,6 @@ def get_next_gen_id(reg_date):
         # Fallback if database is empty or fails
         return f"001/{mm_yy}"
     
-# --- PDF Generation Function ---
-def create_pdf_statement(client_name, client_id, balance, total_marks, history_df, daily_mark):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # New Permanent Public Logo Link
-    logo_url = "https://i.postimg.cc/q7fD0y8k/ruchanet-logo-official.jpg"
-    
-    try:
-        # We download the image into memory so FPDF can read it
-        img_data = requests.get(logo_url).content
-        logo_file = io.BytesIO(img_data)
-        pdf.image(logo_file, x=85, y=10, w=40)
-        pdf.ln(40)
-    except Exception as e:
-        st.error(f"Logo failed to load: {e}")
-        pdf.ln(10)
-    
-    pdf.set_font("Arial", 'B', 16)
-    pdf.set_text_color(0, 51, 102)
-    pdf.cell(0, 10, "RUCHANET DAILY SUSU", ln=True, align='C')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 10, "Official Customer Account Statement", ln=True, align='C')
-    pdf.ln(10)
-    
-    # Client Summary Box
-    pdf.set_fill_color(245, 245, 245)
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(45, 10, " Client Name:", 1, 0, 'L', True)
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(145, 10, f" {client_name}", 1, 1)
-    
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(45, 10, " Current Balance:", 1, 0, 'L', True)
-    pdf.set_text_color(0, 128, 0)
-    pdf.cell(145, 10, f" GHS {balance:,.2f}", 1, 1)
-    
-    pdf.ln(10)
-    pdf.set_text_color(0, 0, 0)
-    
-    # Table Header
-    pdf.set_font("Arial", 'B', 10)
-    pdf.set_fill_color(0, 51, 102)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(50, 10, " Date", 1, 0, 'C', True)
-    pdf.cell(50, 10, " Amount (GHS)", 1, 0, 'C', True)
-    pdf.cell(40, 10, " Marks", 1, 0, 'C', True)
-    pdf.cell(50, 10, " Fee (GHS)", 1, 1, 'C', True)
-    
-    # Table Rows
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", '', 9)
-    for _, row in history_df.iterrows():
-        pdf.cell(50, 9, f" {row['date']}", 1)
-        pdf.cell(50, 9, f" {row['amount']:,.2f}", 1)
-        pdf.cell(40, 9, f" {row['marks_covered']}", 1)
-        pdf.cell(50, 9, f" {row['fee']:,.2f}", 1, 1)
-
-    # Return PDF as bytes
-    return pdf.output(dest='S').encode('latin-1')
-
 # --- 4. SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
@@ -304,7 +240,6 @@ elif choice == "📑 Digital Passbook":
             user_history = contributions[contributions['client_name'] == target].copy()
             total_marks = user_history['marks_covered'].sum() if not user_history.empty else 0
             current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
-            total_pages = math.ceil(total_marks / 31) if total_marks > 0 else 1
             
             col_a, col_b = st.columns([1, 2])
             with col_a:
@@ -315,36 +250,54 @@ elif choice == "📑 Digital Passbook":
                 m1, m2 = st.columns(2)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Marks", f"{total_marks}")
+                # Progress bar based on a 31-day cycle
                 st.progress(min((total_marks % 31) / 31, 1.0))
 
             st.divider()
+            
+            # Action Row: WhatsApp and Browser Print
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
                 # WhatsApp Logic
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
                 wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
-                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 WhatsApp</button></a>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">'
+                    f'<button style="background-color: #25D366; color: white; border: none; padding: 10px; '
+                    f'border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">'
+                    f'🟢 Send via WhatsApp</button></a>', 
+                    unsafe_allow_html=True
+                )
             
             with col_s2:
-                # PDF Logic
-                if not user_history.empty:
-                    pdf_h = user_history.copy()
-                    pdf_h['date'] = pd.to_datetime(pdf_h['date']).dt.strftime('%Y-%m-%d')
-                    try:
-                        pdf_bytes = create_pdf_statement(target, c_info['client_id'], current_balance, total_marks, pdf_h, float(c_info['daily_mark']))
-                        st.download_button("📥 Download PDF", data=pdf_bytes, file_name=f"{target}_Statement.pdf", mime="application/pdf", use_container_width=True)
-                    except Exception as e:
-                        st.error(f"PDF Error: {e}")
-                else:
-                    st.button("📥 No History to Download", disabled=True, use_container_width=True)
+                # Browser Print Logic (Replaces the PDF function)
+                st.markdown("""
+                    <button onclick="window.print()" style="
+                        background-color: #007bff; 
+                        color: white; 
+                        border: none; 
+                        padding: 10px; 
+                        border-radius: 8px; 
+                        width: 100%; 
+                        cursor: pointer; 
+                        font-weight: bold;">
+                        🖨️ Print / Save PDF
+                    </button>
+                    """, unsafe_allow_html=True)
 
             st.divider()
+            
+            # Display Transaction History Table
             if not user_history.empty:
                 st.write("### 📝 History")
                 user_h_display = user_history.copy()
+                # Formatting date for readability in the table
                 user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+                st.dataframe(
+                    user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], 
+                    use_container_width=True
+                )
             else:
                 st.info("No transaction history yet.")
         else:

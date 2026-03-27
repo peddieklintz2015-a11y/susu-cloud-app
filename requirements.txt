@@ -4,3 +4,5 @@ pandas
 psycopg2-binary
 supabase
 xlsxwriter
+fpdf2
+requests

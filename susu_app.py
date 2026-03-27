@@ -1,10 +1,14 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import text
-from datetime import datetime
-import smtplib
-from email.message import EmailMessage
+import time
 import math
+import smtplib
+import io
+import requests
+from datetime import datetime
+from sqlalchemy import text
+from email.message import EmailMessage
+from fpdf import FPDF
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
@@ -71,8 +75,72 @@ def get_next_gen_id(reg_date):
             # Return formatted as 3 digits: "001/03/26"
             return f"{new_num:03d}/{mm_yy}"
     except Exception as e:
+        # We 'use' e here by printing it to the screen
+        st.error(f"⚠️ Database Error: {e}") 
+        
         # Fallback if database is empty or fails
         return f"001/{mm_yy}"
+    
+# --- PDF Generation Function ---
+def create_pdf_statement(client_name, client_id, balance, total_marks, history_df, daily_mark):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # New Permanent Public Logo Link
+    logo_url = "https://i.postimg.cc/q7fD0y8k/ruchanet-logo-official.jpg"
+    
+    try:
+        # We download the image into memory so FPDF can read it
+        img_data = requests.get(logo_url).content
+        logo_file = io.BytesIO(img_data)
+        pdf.image(logo_file, x=85, y=10, w=40)
+        pdf.ln(40)
+    except Exception as e:
+        st.error(f"Logo failed to load: {e}")
+        pdf.ln(10)
+    
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(0, 51, 102)
+    pdf.cell(0, 10, "RUCHANET DAILY SUSU", ln=True, align='C')
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 10, "Official Customer Account Statement", ln=True, align='C')
+    pdf.ln(10)
+    
+    # Client Summary Box
+    pdf.set_fill_color(245, 245, 245)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(45, 10, " Client Name:", 1, 0, 'L', True)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(145, 10, f" {client_name}", 1, 1)
+    
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(45, 10, " Current Balance:", 1, 0, 'L', True)
+    pdf.set_text_color(0, 128, 0)
+    pdf.cell(145, 10, f" GHS {balance:,.2f}", 1, 1)
+    
+    pdf.ln(10)
+    pdf.set_text_color(0, 0, 0)
+    
+    # Table Header
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_fill_color(0, 51, 102)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(50, 10, " Date", 1, 0, 'C', True)
+    pdf.cell(50, 10, " Amount (GHS)", 1, 0, 'C', True)
+    pdf.cell(40, 10, " Marks", 1, 0, 'C', True)
+    pdf.cell(50, 10, " Fee (GHS)", 1, 1, 'C', True)
+    
+    # Table Rows
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", '', 9)
+    for _, row in history_df.iterrows():
+        pdf.cell(50, 9, f" {row['date']}", 1)
+        pdf.cell(50, 9, f" {row['amount']:,.2f}", 1)
+        pdf.cell(40, 9, f" {row['marks_covered']}", 1)
+        pdf.cell(50, 9, f" {row['fee']:,.2f}", 1, 1)
+
+    # Return PDF as bytes
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- 4. SECURITY ---
 def check_password():
@@ -122,46 +190,102 @@ if choice == "📊 Dashboard":
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     if not clients.empty:
+        # 1. Select Client and Get Data
         target = st.selectbox("Select Client", clients['client_name'].tolist())
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row['daily_mark'])
+        c_phone = str(client_row['phone']) 
         
         user_history = contributions[contributions['client_name'] == target]
         total_saved_ghs = user_history['amount'].sum()
         total_marks_saved = user_history['marks_covered'].sum() 
         
+        # --- NEW: PROGRESS TRACKER ---
+        # Calculate current cycle progress (0 to 31)
+        current_cycle_marks = total_marks_saved % 31
+        progress_percent = min(current_cycle_marks / 31, 1.0)
+        st.write(f"📊 **Current Month Progress:** {current_cycle_marks}/31 Marks")
+        st.progress(progress_percent)
+        # -----------------------------
+
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
         can_save = True
         db_amt, db_marks, db_fee = 0.0, 0, 0.0
 
         if ttype == "Deposit":
-            num_marks = st.number_input("Number of Marks", min_value=1, step=1)
+            num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
             db_marks = num_marks
-            st.info(f"Value: GHS {db_amt:,.2f}")
+            st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
         else:
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
-            total_months = math.ceil(total_marks_saved / 31)
-            db_fee = total_months * d_mark
-            total_deduction = requested_cash + db_fee
-            db_amt = -requested_cash
             
-            if total_deduction > total_saved_ghs and requested_cash > 0:
-                st.error("⚠️ Insufficient Balance!")
-                can_save = False
-            else:
-                st.write(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Fee")
+            # --- NEW: MATH.CEIL FEE CALCULATION ---
+            # Charge 1 mark for every month (or part of a month) they have saved
+            # e.g., 32 marks = 2 months = 2 * daily_mark fee
+            months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
+            db_fee = months_count * d_mark
+            # --------------------------------------
+            
+            total_deduction = requested_cash + db_fee
+            db_amt = -requested_cash 
+            
+            if requested_cash > 0:
+                if total_deduction > total_saved_ghs:
+                    st.error(f"⚠️ Insufficient Balance! (Total needed: GHS {total_deduction:,.2f})")
+                    can_save = False
+                else:
+                    st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee ({months_count} months)")
 
+        # 2. Confirm and Save Logic
         if st.button("Confirm & Save") and can_save:
             try:
+                now = datetime.now()
                 with conn.session as s:
-                    s.execute(text("INSERT INTO contributions (client_name, amount, date, marks_covered, fee) VALUES (:n, :a, :d, :mc, :f)"),
-                        {"n": target, "a": db_amt, "d": datetime.now(), "mc": db_marks, "f": db_fee})
+                    s.execute(text("""
+                        INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
+                        VALUES (:n, :a, :d, :mc, :f)
+                    """), {"n": target, "a": db_amt, "d": now, "mc": db_marks, "f": db_fee})
                     s.commit()
-                st.success(f"Transaction recorded for {target}")
-                st.rerun()
+
+                # --- CALCULATE WHATSAPP DATA ---
+                new_balance = total_saved_ghs + db_amt
+                formatted_phone = f"233{c_phone[-9:]}" 
+                
+                receipt_msg = (
+                    f"✨ *RUCHANET DAILY SUSU* ✨%0A"
+                    f"---------------------------%0A"
+                    f"👤 *Client:* {target}%0A"
+                    f"📝 *Type:* {ttype}%0A"
+                    f"💵 *Amount:* GHS {abs(db_amt):,.2f}%0A"
+                    f"🕒 *Time:* {now.strftime('%I:%M %p')}%0A"
+                    f"---------------------------%0A"
+                    f"⭐ *NEW BALANCE:* GHS {new_balance:,.2f}%0A"
+                    f"---------------------------%0A"
+                    f"Thank you for saving! 🙏"
+                )
+                wa_link = f"https://wa.me/{formatted_phone}?text={receipt_msg}"
+
+                # 3. SUCCESS UI
+                st.toast(f"✅ {ttype} Recorded! New Balance: GHS {new_balance:,.2f}", icon="💰")
+                st.balloons()
+
+                # SHOW WHATSAPP BUTTON
+                st.markdown(f"""
+                    <a href="{wa_link}" target="_blank">
+                        <button style="background-color: #25D366; color: white; padding: 15px; border: none; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px;">
+                            🟢 Send WhatsApp Receipt
+                        </button>
+                    </a>
+                """, unsafe_allow_html=True)
+                
+                time.sleep(1)
+                if st.button("Refresh App"):
+                    st.rerun()
+
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"🚨 Transaction Failed: {e}")
+                st.toast("Error saving to database", icon="❌")
     else:
         st.error("Please register clients in Admin Tools first.")
 
@@ -171,50 +295,67 @@ elif choice == "📑 Digital Passbook":
     
     if not clients.empty:
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
+        
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
             
-            # --- Business Logic: Page & Commission Tracking ---
-            user_history = combined_df[combined_df['client_name'] == target]
-            total_marks = user_history['marks_covered'].sum()
-            current_balance = user_history['amount'].sum()
-            
-            # Calculate page progress
-            completed_pages = int(total_marks // 31)
-            marks_on_current_page = int(total_marks % 31)
-            marks_needed_for_next = 31 - marks_on_current_page
+            # --- Business Logic ---
+            user_history = contributions[contributions['client_name'] == target].copy()
+            total_marks = user_history['marks_covered'].sum() if not user_history.empty else 0
+            current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
+            total_pages = math.ceil(total_marks / 31) if total_marks > 0 else 1
             
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                photo_url = c_info.get('photo_url')
-                if photo_url and str(photo_url).strip().lower() != "none":
-                    st.image(photo_url, width=230)
-                else:
-                    st.info("👤 No photo.")
-            
+                if c_info.get('photo_url'):
+                    st.image(c_info['photo_url'], use_container_width=True)
             with col_b:
-                st.subheader(f"Account: {target} (ID: {c_info['client_id']})")
+                st.subheader(f"Account: {target}")
                 m1, m2 = st.columns(2)
-                m1.metric("Savings Balance", f"GHS {current_balance:,.2f}")
-                m2.metric("Total Marks", f"{total_marks} days")
-                
-                # --- Page Progress Bar ---
-                st.write(f"📖 *Passbook Page {completed_pages + 1}*")
-                progress = marks_on_current_page / 31
-                st.progress(progress)
-                st.caption(f"{marks_on_current_page} marks done. {marks_needed_for_next} marks left until next page commission.")
+                m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
+                m2.metric("📅 Marks", f"{total_marks}")
+                st.progress(min((total_marks % 31) / 31, 1.0))
+
+            st.divider()
+            col_s1, col_s2 = st.columns(2)
+            
+            with col_s1:
+                # WhatsApp Logic
+                formatted_phone = f"233{str(c_info['phone'])[-9:]}"
+                wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
+                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 WhatsApp</button></a>', unsafe_allow_html=True)
+            
+            with col_s2:
+                # PDF Logic
+                if not user_history.empty:
+                    pdf_h = user_history.copy()
+                    pdf_h['date'] = pd.to_datetime(pdf_h['date']).dt.strftime('%Y-%m-%d')
+                    try:
+                        pdf_bytes = create_pdf_statement(target, c_info['client_id'], current_balance, total_marks, pdf_h, float(c_info['daily_mark']))
+                        st.download_button("📥 Download PDF", data=pdf_bytes, file_name=f"{target}_Statement.pdf", mime="application/pdf", use_container_width=True)
+                    except Exception as e:
+                        st.error(f"PDF Error: {e}")
+                else:
+                    st.button("📥 No History to Download", disabled=True, use_container_width=True)
 
             st.divider()
             if not user_history.empty:
-                st.dataframe(user_history.sort_values(by='date', ascending=False), use_container_width=True)
+                st.write("### 📝 History")
+                user_h_display = user_history.copy()
+                user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
+                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+            else:
+                st.info("No transaction history yet.")
+        else:
+            st.info("No matching profiles.")
     else:
         st.error("No clients registered.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
-    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Commission Tracker" ])
+    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage " ])
     
     with t1:
         st.subheader("👤 Register New Client")
@@ -264,8 +405,10 @@ elif choice == "🛠 Admin Tools":
                                      {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
                             s.commit()
                         
-                        st.success(f"✅ Registered {name} successfully! ID: {gen_id}")
+                        st.success(f"✅ Registered {name} successfully!")
+                        st.toast(f"👤 {name} registered to cloud!", icon="✅")
                         st.balloons()
+                        time.sleep(3) # Give them a second to see the toast
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
@@ -364,39 +507,87 @@ with t3:
         st.error("❌ Incorrect Admin Password")
 
 with t4:
-    st.subheader("💰 Commission & Client Search")
+    st.subheader("⚙️ Secure Client Profile Manager")
+    st.error("❗ **CRITICAL AREA**: Deletion removes the client, photo, and history permanently.")
 
     if not clients.empty:
-        # 1. Search Bar
-        search_query = st.text_input("🔍 Search Client by Name or ID")
+        # Search Bar
+        search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
         
-        # Filter the dataframe
-        filtered_clients = clients[
+        filtered = clients[
             clients['client_name'].str.contains(search_query, case=False) | 
             clients['client_id'].str.contains(search_query, case=False)
         ]
 
-        if not filtered_clients.empty:
-            # 2. Select Client
-            selected_name = st.selectbox("Select a client to view details", filtered_clients['client_name'])
+        if not filtered.empty:
+            selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+            c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+            target_id = c_data['client_id']
             
-            # Get data for the specific client
-            c_data = clients[clients['client_name'] == selected_name].iloc[0]
+            # Calculate Balance
+            u_history = contributions[contributions['client_name'] == selected_name]
+            final_balance = u_history['amount'].sum()
             
-            # 3. Create Columns for Layout
             col1, col2 = st.columns([1, 2])
-            
-            # --- THIS IS WHERE YOUR CODE GOES ---
             with col1:
                 if c_data['photo_url']:
-                    st.image(c_data['photo_url'], caption=f"ID: {c_data['client_id']}", use_container_width=True)
-                else:
-                    st.warning("No photo available for this client.")
-            
-            # 4. Show the rest of the info in the second column
+                    st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
             with col2:
-                st.markdown(f"### {c_data['client_name']}")
-                st.write(f"📞 *Phone:* {c_data['phone']}")
-                # ... rest of your commission math ...
+                st.write(f"**Name:** {c_data['client_name']}")
+                st.write(f"**Phone:** {c_data['phone']}")
+                st.write(f"**Payout Due:** GHS {final_balance:,.2f}")
+
+            st.markdown("---")
+            
+            # Triple Lock System
+            confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
+            
+            if confirm_check:
+                admin_pass = st.text_input("🔐 Admin Password Required", type="password")
+                
+                if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                    if admin_pass == st.secrets["passwords"]["admin_password"]:
+                        try:
+                            # 1. Storage Cleanup
+                            from supabase import create_client
+                            sb = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+                            file_path = f"{target_id.replace('/', '_')}.jpg"
+                            try:
+                                sb.storage.from_("client-photos").remove([file_path])
+                            except Exception:
+                                pass 
+
+                            # 2. Database Cleanup
+                            with conn.session as s:
+                                s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                s.commit()
+
+                            # 3. Success Toast
+                            st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
+                            
+                            # 4. Audit Email
+                            try:
+                                audit_msg = EmailMessage()
+                                audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
+                                audit_msg['From'] = st.secrets["emails"]["sender_email"]
+                                audit_msg['To'] = st.secrets["emails"]["receiver_email"]
+                                audit_msg.set_content(f"Deleted: {selected_name}\nID: {target_id}\nPayout: GHS {final_balance}\nTime: {datetime.now()}")
+                                
+                                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                                    server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
+                                    server.send_message(audit_msg)
+                            except Exception:
+                                pass
+
+                            time.sleep(2)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"🚨 Wipe Failed: {e}")
+                    else:
+                        st.error("❌ Incorrect Password.")
         else:
-            st.warning("No clients match your search.")
+            st.info("No matching profiles.")
+    else:
+        st.info("Database empty.")

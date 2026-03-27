@@ -226,39 +226,22 @@ elif choice == "💸 Transactions":
         st.error("Please register clients in Admin Tools first.")
 
 elif choice == "📑 Digital Passbook":
-    # FIX: Use datetime.now() (not datetime.datetime.now()) due to your import style
+    # 1. Setup the Print Header (Hidden on web, visible on print)
     current_date = datetime.now().strftime("%d %B, %Y")
-    
-    # FIX: Corrected RAW link for GitHub (Replaced 'blob' with 'raw')
     logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/main/logo.jpeg"
     
-    # --- Print-Only Logo, Header, and Date ---
     st.markdown(f"""
         <style>
         .print-header {{ display: none; }}
         @media print {{
-            .print-header {{
-                display: flex !important;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                margin-bottom: 30px;
-                border-bottom: 2px solid #333;
-                padding-bottom: 10px;
-            }}
-            .print-header img {{ width: 100px; margin-bottom: 10px; }}
-            .print-header h1 {{ margin: 0; font-size: 24px; }}
-            .print-header p {{ margin: 5px 0; font-size: 14px; color: #555; }}
-            /* Hides UI elements during print */
+            .print-header {{ display: flex !important; flex-direction: column; align-items: center; text-align: center; margin-bottom: 20px; }}
+            .print-header img {{ width: 100px; }}
             section[data-testid="stSidebar"], .stActionButton, header {{ display: none !important; }}
         }}
         </style>
-        
         <div class="print-header">
             <img src="{logo_url}">
             <h1>RUCHANET DAILY SUSU</h1>
-            <p><strong>Official Client Statement</strong></p>
             <p>Generated on: {current_date}</p>
         </div>
     """, unsafe_allow_html=True)
@@ -278,6 +261,7 @@ elif choice == "📑 Digital Passbook":
             total_marks = user_history['marks_covered'].sum() if not user_history.empty else 0
             current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
             
+            # UI Display
             col_a, col_b = st.columns([1, 2])
             with col_a:
                 if c_info.get('photo_url'):
@@ -287,43 +271,31 @@ elif choice == "📑 Digital Passbook":
                 m1, m2 = st.columns(2)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Marks", f"{total_marks}")
-                st.progress(min((total_marks % 31) / 31, 1.0))
 
             st.divider()
             
-            # Action Row
+            # --- THE FIX: NEW ACTION ROW ---
             col_s1, col_s2 = st.columns(2)
-            
             with col_s1:
+                # WhatsApp Button
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
                 wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
-                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 Send via WhatsApp</button></a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 WhatsApp</button></a>', unsafe_allow_html=True)
             
             with col_s2:
-                # Browser Print Button
+                # REPLACES PDF FUNCTION: Browser Print Button
                 st.markdown("""
-                    <button onclick="window.print()" style="
-                        background-color: #007bff; 
-                        color: white; 
-                        border: none; 
-                        padding: 10px; 
-                        border-radius: 8px; 
-                        width: 100%; 
-                        cursor: pointer; 
-                        font-weight: bold;">
+                    <button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
                         🖨️ Print / Save PDF
                     </button>
-                    """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-            st.divider()
-            
+            # History Table
             if not user_history.empty:
                 st.write("### 📝 History")
                 user_h_display = user_history.copy()
                 user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
                 st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
-            else:
-                st.info("No transaction history yet.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
@@ -435,7 +407,7 @@ elif choice == "🛠 Admin Tools":
                             s.commit()
                         st.rerun()
 
-with t4:
+    with t4:
         st.subheader("⚙️ Secure Client Profile Manager")
         st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
 

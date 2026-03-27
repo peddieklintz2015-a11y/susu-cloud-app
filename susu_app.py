@@ -6,6 +6,7 @@ import smtplib
 from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
+from supabase import create_client
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
@@ -296,12 +297,13 @@ elif choice == "📑 Digital Passbook":
                 user_h_display = user_history.copy()
                 user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
                 st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+            else:
+                st.info("No transaction history yet.") # Added this to close the 'if not user_history.empty'
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
-    
-    # FIX: This line defines t4. Ensure it exists before "with t4:"
+       # FIX: This line defines t4. Ensure it exists before "with t4:"
     t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile"])
     
     with t1:

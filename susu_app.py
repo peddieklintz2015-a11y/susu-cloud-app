@@ -66,35 +66,122 @@ def fetch_data():
         st.error(f"Failed to fetch data: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
+def send_weekly_report(contributions_df, manual=False):
+    try:
+        now_dt = datetime.now()
+        today = now_dt.date()
+        start_of_week = today - pd.Timedelta(days=today.weekday())
+        end_of_week = start_of_week + pd.Timedelta(days=6)
+        
+        week_data = contributions_df[
+            (contributions_df['date'].dt.date >= start_of_week) & 
+            (contributions_df['date'].dt.date <= end_of_week)
+        ].copy()
+        
+        if week_data.empty and not manual:
+            return False 
+
+        week_data['Day'] = week_data['date'].dt.strftime('%A')
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        summary = week_data.groupby('Day').agg({
+            'amount': [lambda x: x[x > 0].sum(), lambda x: abs(x[x < 0].sum())],
+            'fee': 'sum'
+        }).reindex(day_order).fillna(0)
+        summary.columns = ['Deposits', 'Withdrawals', 'Commissions']
+
+        table_rows = ""
+        for day, row in summary.iterrows():
+            bg_color = "#f9f9f9" if day in ['Saturday', 'Sunday'] else "#ffffff"
+            table_rows += f"""
+            <tr style="background-color: {bg_color}; border-bottom: 1px solid #eee;">
+                <td style="padding: 10px;"><b>{day}</b></td>
+                <td style="padding: 10px; text-align: right;">{row['Deposits']:,.2f}</td>
+                <td style="padding: 10px; text-align: right;">{row['Withdrawals']:,.2f}</td>
+                <td style="padding: 10px; text-align: right; color: #27ae60;">{row['Commissions']:,.2f}</td>
+            </tr>"""
+
+        total_vault = contributions_df['amount'].sum()
+        weekly_commissions = summary['Commissions'].sum()
+
+        html_content = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <div style="background-color: #212529; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
+                    <h1 style="color: #FFD700; margin: 0;">RUCHANET WEEKLY SUMMARY</h1>
+                    <p style="color: #fff; margin: 5px 0 0 0;">Week: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b, %Y')}</p>
+                </div>
+                <div style="padding: 20px; border: 1px solid #ddd;">
+                    <h3>📈 Weekly Cash Flow</h3>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <thead style="background-color: #f2f2f2;">
+                            <tr>
+                                <th style="padding: 10px; text-align: left;">Day</th>
+                                <th style="padding: 10px; text-align: right;">Deposits (GHS)</th>
+                                <th style="padding: 10px; text-align: right;">Withdr. (GHS)</th>
+                                <th style="padding: 10px; text-align: right;">Comm. (GHS)</th>
+                            </tr>
+                        </thead>
+                        <tbody>{table_rows}</tbody>
+                    </table>
+                    <div style="margin-top: 25px; background: #f4f4f4; padding: 15px; border-radius: 5px;">
+                        <p style="margin: 5px 0;"><b>Total Weekly Commission:</b> GHS {weekly_commissions:,.2f}</p>
+                        <p style="margin: 5px 0; font-size: 18px; color: #2c3e50;"><b>Final Vault Balance: GHS {total_vault:,.2f}</b></p>
+                    </div>
+                    <p style="font-size: 12px; color: #888; margin-top: 20px;">Generated at: {now_dt.strftime('%Y-%m-%d %I:%M %p')}</p>
+                </div>
+            </body>
+        </html>
+        """
+
+        msg = EmailMessage()
+        msg['Subject'] = f"📊 {'AUTO' if not manual else 'MANUAL'} Report: {start_of_week.strftime('%d %b')}"
+        msg['From'] = st.secrets["emails"]["sender_email"]
+        msg['To'] = st.secrets["emails"]["receiver_email"]
+        msg.add_alternative(html_content, subtype='html')
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        if manual: 
+            st.error(f"Error: {e}")
+        return False
+
 def get_next_gen_id(reg_date):
     # Format month and year: e.g., "03/26"
     mm_yy = reg_date.strftime("%m/%y")
     
     try:
         with conn.session as s:
-            # Look for IDs ending with the current month/year
+            # 1. Look for IDs ending with the current month/year
+            # We use LIKE with % to find anything ending in /MM/YY
             result = s.execute(text("""
                 SELECT client_id FROM clients 
                 WHERE client_id LIKE :pattern 
                 ORDER BY client_id DESC LIMIT 1
             """), {"pattern": f"%/{mm_yy}"}).fetchone()
             
-            if result:
-                # If result is "005/03/26", take "005", make it 5, add 1 = 6
+            # 2. Extract the number if a result exists
+            if result and result[0]:
                 last_id = result[0]
-                last_num = int(last_id.split('/')[0])
-                new_num = last_num + 1
+                try:
+                    # If last_id is "005/03/26", split by '/' and take the first part "005"
+                    last_num = int(last_id.split('/')[0])
+                    new_num = last_num + 1
+                except (ValueError, IndexError):
+                    # If the ID format was corrupted somehow, start at 1
+                    new_num = 1
             else:
                 # First client of the month
                 new_num = 1
                 
-            # Return formatted as 3 digits: "001/03/26"
+            # 3. Return formatted as 3 digits: "001/03/26"
             return f"{new_num:03d}/{mm_yy}"
+            
     except Exception as e:
-        # We 'use' e here by printing it to the screen
-        st.error(f"⚠️ Database Error: {e}") 
-        
-        # Fallback if database is empty or fails
+        # If the table doesn't exist yet or the connection fails
+        st.error(f"⚠️ ID Generation Error: {e}") 
         return f"001/{mm_yy}"
     
 # --- 4. SECURITY ---
@@ -119,28 +206,81 @@ if not check_password():
 clients, contributions = fetch_data()
 combined_df = pd.merge(contributions, clients[['client_id', 'client_name']], on='client_name', how='left') if not clients.empty else contributions
 
+# --- SMART AUTO-REPORT TRIGGER ---
+now = datetime.now()
+# 6 = Sunday, and hour >= 8 means 8 AM or later
+if now.weekday() == 6 and now.hour >= 8: 
+    # Use the date string as a key so it only sends ONCE per Sunday
+    backup_key = f"sent_{now.strftime('%Y-%m-%d')}"
+    if backup_key not in st.session_state:
+        if send_weekly_report(contributions, manual=False):
+            st.session_state[backup_key] = True
+            st.toast(f"📧 Sunday Report Sent at {now.strftime('%I:%M %p')}", icon="📅")
+
 # --- 6. NAVIGATION ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    st.title("📊 Financial Overview")
-    if not contributions.empty and len(contributions) > 0:
+    # 1. Header & Refresh Control
+    head_col, btn_col = st.columns([5, 1])
+    with head_col:
+        st.title("📊 Financial Overview")
+    with btn_col:
+        st.markdown("<br>", unsafe_allow_html=True) # Spacer to align button with Title
+        if st.button("🔄 Refresh"):
+            st.rerun()
+    
+    # 2. Latest Member Alert
+    if not clients.empty:
+        last_client = clients.iloc[-1] 
+        st.success(f"🆕 **Latest Member Registered:** {last_client['client_name']} (ID: {last_client['client_id']})")
+        total_client_count = len(clients)
+    else:
+        st.info("💡 Tip: Go to Admin Tools to register your first client!")
+        total_client_count = 0
+
+    # 3. Key Metrics (Always shows 4 columns)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("👥 Total Clients", f"{total_client_count}")
+
+    if not contributions.empty:
         total_vault = contributions['amount'].sum()
         total_commissions = contributions['fee'].sum()
         net_liability = total_vault - total_commissions 
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Vault (Cash)", f"GHS {total_vault:,.2f}")
-        m2.metric("Org. Commissions", f"GHS {total_commissions:,.2f}")
-        m3.metric("Net Client Liability", f"GHS {net_liability:,.2f}")
+        m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}")
+        m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
+        m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}")
 
+        # 4. Monthly Profit Chart
+        st.subheader("📈 Monthly Commission Growth")
         chart_df = contributions.copy()
         chart_df['Month'] = chart_df['date'].dt.strftime('%b %Y')
         monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
         st.bar_chart(data=monthly_profit, x='Month', y='fee')
+
+        # 5. NEW: Today's Transaction Log
+        st.subheader("🕒 Today's Activity")
+        today_date = datetime.now().date()
+        # Filter for today's date
+        today_logs = contributions[contributions['date'].dt.date == today_date].copy()
+        
+        if not today_logs.empty:
+            # Clean up the display for the table
+            today_logs['Time'] = today_logs['date'].dt.strftime('%I:%M %p')
+            display_logs = today_logs[['Time', 'client_name', 'amount', 'marks_covered']].sort_values(by='Time', ascending=False)
+            display_logs.columns = ['Time', 'Client', 'Amount (GHS)', 'Marks']
+            st.table(display_logs)
+        else:
+            st.info("No transactions recorded yet today.")
+            
     else:
-        st.info("👋 Welcome! Start by registering a client and recording a deposit.")
+        # Show zeroed metrics if no transactions exist in the whole system
+        m2.metric("💰 Total Vault", "GHS 0.00")
+        m3.metric("📈 Commissions", "GHS 0.00")
+        m4.metric("📉 Net Liability", "GHS 0.00")
+        st.info("No transaction records found in the system yet.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
@@ -378,6 +518,12 @@ elif choice == "🛠 Admin Tools":
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
+
+    with t2:
+        st.subheader("📊 Weekly Executive Intelligence")
+        if st.button("🚀 Force Send Comprehensive Weekly Report"):
+            if send_weekly_report(contributions, manual=True):
+                st.success(f"✅ Report sent successfully at {datetime.now().strftime('%I:%M %p')}!")
 
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")

@@ -30,8 +30,18 @@ def set_custom_style():
 
 set_custom_style()
 
-# --- 2. DATABASE ---
+# --- 2. DATABASE & CLOUD SETUP ---
 conn = st.connection("postgresql", type="sql")
+
+# Initialize Supabase once at the start
+try:
+    sb_client = create_client(
+        st.secrets["supabase_url"], 
+        st.secrets["supabase_key"]
+    )
+except Exception as e:
+    st.error(f"Critical Error: Supabase configuration missing! {e}")
+    st.stop()
 
 # --- 3. DATA FUNCTIONS ---
 @st.cache_data(ttl=60)
@@ -115,7 +125,7 @@ choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
     st.title("📊 Financial Overview")
-    if not contributions.empty:
+    if not contributions.empty and len(contributions) > 0:
         total_vault = contributions['amount'].sum()
         total_commissions = contributions['fee'].sum()
         net_liability = total_vault - total_commissions 
@@ -130,7 +140,7 @@ if choice == "📊 Dashboard":
         monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
         st.bar_chart(data=monthly_profit, x='Month', y='fee')
     else:
-        st.info("No records yet.")
+        st.info("👋 Welcome! Start by registering a client and recording a deposit.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
@@ -335,22 +345,31 @@ elif choice == "🛠 Admin Tools":
                 else:
                     try:
                         gen_id = get_next_gen_id(reg_date)
-                        from supabase import create_client
-                        sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-
+                        # Format filename for storage
                         file_path = f"{gen_id.replace('/', '_')}.jpg"
+                        
+                        # 1. Upload Photo to Supabase Storage
                         sb_client.storage.from_("client-photos").upload(
                             path=file_path,
                             file=photo.getvalue(),
                             file_options={"content-type": "image/jpeg"}
                         )
 
+                        # 2. Construct Public URL
                         p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
 
+                        # 3. Save to SQL Database
                         with conn.session as s:
-                            s.execute(text("""INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                            VALUES (:i, :n, :p, :d, :u)"""),
-                                     {"i": gen_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                            s.execute(text("""
+                                INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                                VALUES (:i, :n, :p, :d, :u)
+                            """), {
+                                "i": gen_id, 
+                                "n": name.strip(), 
+                                "p": phone.strip(), 
+                                "d": daily, 
+                                "u": p_url
+                            })
                             s.commit()
                         
                         st.success(f"✅ Registered {name} successfully!")
@@ -359,95 +378,6 @@ elif choice == "🛠 Admin Tools":
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
-
-    with t2:
-        st.subheader("📊 Weekly Executive Intelligence")
-        if st.button("Generate & Send Comprehensive Weekly Report"):
-            try:
-                # 1. Calculate Week Range (Monday to Sunday)
-                today = datetime.now().date()
-                start_of_week = today - pd.Timedelta(days=today.weekday())  # Last Monday
-                end_of_week = start_of_week + pd.Timedelta(days=6)         # Next Sunday
-                
-                # 2. Filter Data for this week
-                week_data = contributions[
-                    (contributions['date'].dt.date >= start_of_week) & 
-                    (contributions['date'].dt.date <= end_of_week)
-                ].copy()
-                
-                # 3. Daily Summary Table Construction
-                week_data['Day'] = week_data['date'].dt.strftime('%A')
-                # Ensure the order is Monday to Sunday
-                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                
-                summary = week_data.groupby('Day').agg({
-                    'amount': [lambda x: x[x > 0].sum(), lambda x: abs(x[x < 0].sum())],
-                    'fee': 'sum'
-                }).reindex(day_order).fillna(0)
-                summary.columns = ['Deposits', 'Withdrawals', 'Commissions']
-
-                # Build HTML Table rows
-                table_rows = ""
-                for day, row in summary.iterrows():
-                    bg_color = "#f9f9f9" if day in ['Saturday', 'Sunday'] else "#ffffff"
-                    table_rows += f"""
-                    <tr style="background-color: {bg_color}; border-bottom: 1px solid #eee;">
-                        <td style="padding: 10px;"><b>{day}</b></td>
-                        <td style="padding: 10px; text-align: right;">{row['Deposits']:,.2f}</td>
-                        <td style="padding: 10px; text-align: right;">{row['Withdrawals']:,.2f}</td>
-                        <td style="padding: 10px; text-align: right; color: #27ae60;">{row['Commissions']:,.2f}</td>
-                    </tr>"""
-
-                # 4. Totals
-                total_vault = contributions['amount'].sum()
-                weekly_commissions = summary['Commissions'].sum()
-
-                # 5. Build HTML Email
-                html_content = f"""
-                <html>
-                    <body style="font-family: Arial, sans-serif; color: #333;">
-                        <div style="background-color: #212529; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
-                            <h1 style="color: #FFD700; margin: 0;">RUCHANET WEEKLY SUMMARY</h1>
-                            <p style="color: #fff; margin: 5px 0 0 0;">Week: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b, %Y')}</p>
-                        </div>
-                        
-                        <div style="padding: 20px; border: 1px solid #ddd;">
-                            <h3>📈 Weekly Cash Flow</h3>
-                            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                                <thead style="background-color: #f2f2f2;">
-                                    <tr>
-                                        <th style="padding: 10px; text-align: left;">Day</th>
-                                        <th style="padding: 10px; text-align: right;">Deposits (GHS)</th>
-                                        <th style="padding: 10px; text-align: right;">Withdr. (GHS)</th>
-                                        <th style="padding: 10px; text-align: right;">Comm. (GHS)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>{table_rows}</tbody>
-                            </table>
-
-                            <div style="margin-top: 25px; background: #f4f4f4; padding: 15px; border-radius: 5px;">
-                                <p style="margin: 5px 0;"><b>Total Weekly Commission:</b> GHS {weekly_commissions:,.2f}</p>
-                                <p style="margin: 5px 0; font-size: 18px; color: #2c3e50;"><b>Final Vault Balance: GHS {total_vault:,.2f}</b></p>
-                            </div>
-                        </div>
-                        <p style="font-size: 11px; color: #999; text-align: center;">Generated via Ruchanet Cloud Admin Tool</p>
-                    </body>
-                </html>
-                """
-
-                msg = EmailMessage()
-                msg['Subject'] = f"📊 Weekly BI Report: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b')}"
-                msg['From'] = st.secrets["emails"]["sender_email"]
-                msg['To'] = st.secrets["emails"]["receiver_email"]
-                msg.add_alternative(html_content, subtype='html')
-
-                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                    server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
-                    server.send_message(msg)
-                st.success(f"✅ Weekly report for {start_of_week.strftime('%d %b')} sent!")
-                
-            except Exception as e:
-                st.error(f"Failed to generate weekly report: {e}")
 
     with t3:
         st.subheader("🛑 Restricted Data Cleanup")
@@ -475,7 +405,6 @@ elif choice == "🛠 Admin Tools":
         st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
 
         if not clients.empty:
-            # Search Bar
             search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
             
             filtered = clients[
@@ -488,7 +417,6 @@ elif choice == "🛠 Admin Tools":
                 c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
                 target_id = c_data['client_id']
                 
-                # Calculate Balance
                 u_history = contributions[contributions['client_name'] == selected_name]
                 final_balance = u_history['amount'].sum()
                 
@@ -503,24 +431,21 @@ elif choice == "🛠 Admin Tools":
 
                 st.markdown("---")
                 
-                # Triple Lock System
                 confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
                 
                 if confirm_check:
                     admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
                     
+                    # ... existing code ...
                     if st.button("💥 AUTHORIZE PERMANENT WIPE"):
                         if admin_pass == st.secrets["passwords"]["admin_password"]:
                             try:
-                                # 1. Storage Cleanup
-                                from supabase import create_client
-                                sb = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-                                # Use underscore to match how we saved it
+                                    # 1. Storage Cleanup
                                 file_path = f"{target_id.replace('/', '_')}.jpg"
                                 try:
-                                    sb.storage.from_("client-photos").remove([file_path])
-                                except Exception:
-                                    pass 
+                                    sb_client.storage.from_("client-photos").remove([file_path])
+                                except Exception: # Removed 'as storage_err'
+                                    st.warning("Note: Could not delete photo file (it may have been missing).") # Removed 'f'
 
                                 # 2. Database Cleanup
                                 with conn.session as s:
@@ -528,25 +453,24 @@ elif choice == "🛠 Admin Tools":
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()
 
-                                # 3. Success Feedback
+                                # 3. Success Feedback & Audit Email
                                 st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
                                 
-                                # 4. Audit Email
+                                # Send Audit Email
                                 try:
                                     audit_msg = EmailMessage()
                                     audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
                                     audit_msg['From'] = st.secrets["emails"]["sender_email"]
                                     audit_msg['To'] = st.secrets["emails"]["receiver_email"]
-                                    # FIX: Use datetime.now() because of your specific import
                                     audit_msg.set_content(f"Deleted: {selected_name}\nID: {target_id}\nPayout: GHS {final_balance}\nTime: {datetime.now()}")
                                     
                                     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                                         server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                                         server.send_message(audit_msg)
                                 except Exception:
-                                    pass
+                                    pass # Ensure app doesn't crash if email fails
 
-                                time.sleep(2)
+                                time.sleep(1)
                                 st.rerun()
                                 
                             except Exception as e:

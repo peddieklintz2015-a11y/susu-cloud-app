@@ -553,45 +553,53 @@ elif choice == "🛠 Admin Tools":
         if not clients.empty:
             search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
             
+            # Filter the dataframe based on search
             filtered = clients[
                 clients['client_name'].str.contains(search_query, case=False) | 
                 clients['client_id'].str.contains(search_query, case=False)
             ]
 
             if not filtered.empty:
-                selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+                selected_name = st.selectbox("Select Profile to Manage:", filtered['client_name'])
+                
+                # Fetch specific client data
                 c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-                target_id = c_data['client_id']
+                target_id = str(c_data['client_id']) # Ensure it's a string
                 
+                # Calculate Payout Balance
                 u_history = contributions[contributions['client_name'] == selected_name]
-                final_balance = u_history['amount'].sum()
+                final_balance = u_history['amount'].sum() if not u_history.empty else 0.0
                 
+                # Display Profile Info
                 col1, col2 = st.columns([1, 2])
                 with col1:
                     if c_data['photo_url']:
                         st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
                 with col2:
-                    st.write(f"*Name:* {c_data['client_name']}")
-                    st.write(f"*Phone:* {c_data['phone']}")
-                    st.write(f"*Payout Due:* GHS {final_balance:,.2f}")
+                    st.write(f"**Name:** {c_data['client_name']}")
+                    st.write(f"**Phone:** {c_data['phone']}")
+                    st.write(f"**Payout Due:** GHS {final_balance:,.2f}")
 
                 st.markdown("---")
                 
+                # Security Checkpoint
                 confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
                 
                 if confirm_check:
                     admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
                     
-                    # ... existing code ...
                     if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                        # Check password against secrets
                         if admin_pass == st.secrets["passwords"]["admin_password"]:
                             try:
-                                    # 1. Storage Cleanup
-                                file_path = f"{target_id.replace('/', '_')}.jpg"
+                                # 1. Storage Cleanup (Safe Replace)
+                                safe_filename = target_id.replace('/', '_')
+                                file_path = f"{safe_filename}.jpg"
+                                
                                 try:
                                     sb_client.storage.from_("client-photos").remove([file_path])
-                                except Exception: # Removed 'as storage_err'
-                                    st.warning("Note: Could not delete photo file (it may have been missing).") # Removed 'f'
+                                except Exception:
+                                    st.warning("Note: Photo file could not be removed from cloud storage.")
 
                                 # 2. Database Cleanup
                                 with conn.session as s:
@@ -599,10 +607,7 @@ elif choice == "🛠 Admin Tools":
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()
 
-                                # 3. Success Feedback & Audit Email
-                                st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
-                                
-                                # Send Audit Email
+                                # 3. Audit Email
                                 try:
                                     audit_msg = EmailMessage()
                                     audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
@@ -614,16 +619,17 @@ elif choice == "🛠 Admin Tools":
                                         server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
                                         server.send_message(audit_msg)
                                 except Exception:
-                                    pass # Ensure app doesn't crash if email fails
+                                    pass 
 
+                                st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
                                 time.sleep(1)
                                 st.rerun()
                                 
                             except Exception as e:
                                 st.error(f"🚨 Wipe Failed: {e}")
                         else:
-                            st.error("❌ Incorrect Password.")
+                            st.error("❌ Incorrect Admin Password.")
             else:
-                st.info("No matching profiles.")
+                st.info("No matching profiles found for your search.")
         else:
-            st.info("Database empty.")
+            st.info("The client database is currently empty.")

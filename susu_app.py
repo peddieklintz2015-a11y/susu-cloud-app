@@ -374,7 +374,7 @@ elif choice == "💸 Transactions":
                     </a>
                 """, unsafe_allow_html=True)
                 
-                time.sleep(1)
+                time.sleep(2)
                 if st.button("Refresh App"):
                     st.rerun()
 
@@ -482,37 +482,32 @@ elif choice == "🛠 Admin Tools":
             submit = st.form_submit_button("Register to Cloud")
             
             if submit: 
-                # Validation check
-                if not name.strip() or not phone.strip():
-                    st.error("❌ Name and Phone are required.")
-                elif photo is None:
-                    st.error("📸 Please take a photo first!")
+                if not name.strip() or not phone.strip() or photo is None:
+                    st.error("❌ All fields (Name, Phone, and Photo) are required")
                 else:
                     try:
+                        # 1. Generate the ID and create a safe filename
                         gen_id = get_next_gen_id(reg_date)
-                        # Create a safe filename (remove slashes/spaces)
-                        file_name = f"{gen_id.replace('/', '').replace(' ', '')}.jpg"
+                        # This replaces "/" with "-" so "001/03/26" becomes "001-03-26.jpg"
+                        file_name = f"{gen_id.replace('/', '-')}.jpg"
                         
-                        # 1. Upload Photo to Supabase Storage
-                        # Added 'upsert': True to overwrite if the file exists
+                        # 2. Upload Photo to Supabase Storage with 'upsert'
                         sb_client.storage.from_("client-photos").upload(
                             path=file_name,
                             file=photo.getvalue(),
                             file_options={"content-type": "image/jpeg", "upsert": "true"}
                         )
 
-                        # 2. Construct Public URL 
-                        # Ensure your bucket "client-photos" is set to PUBLIC in Supabase
+                        # 3. Construct Public URL
                         base_url = st.secrets['supabase_url']
                         p_url = f"{base_url}/storage/v1/object/public/client-photos/{file_name}"
 
-                        # 3. Save to SQL Database using the connection session
+                        # 4. Save to SQL Database
                         with conn.session as s:
-                            query = text("""
+                            s.execute(text("""
                                 INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                 VALUES (:i, :n, :p, :d, :u)
-                            """)
-                            s.execute(query, {
+                            """), {
                                 "i": gen_id, 
                                 "n": name.strip(), 
                                 "p": phone.strip(), 
@@ -523,13 +518,12 @@ elif choice == "🛠 Admin Tools":
                         
                         st.success(f"✅ Registered {name} successfully!")
                         st.balloons()
-                        # Small delay so user sees success before rerun
                         time.sleep(2)
                         st.rerun()
-                        
+
                     except Exception as e:
-                        # This will catch if the bucket name is wrong or DB columns mismatch
-                        st.error(f"🚨 Registration Failed: {str(e)}")
+                        # This will catch the 403 error if your Storage Policies aren't set yet
+                        st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
         st.subheader("📊 Weekly Executive Intelligence")
@@ -634,7 +628,7 @@ elif choice == "🛠 Admin Tools":
                                     pass 
 
                                 st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
-                                time.sleep(1)
+                                time.sleep(3)
                                 st.rerun()
                                 
                             except Exception as e:

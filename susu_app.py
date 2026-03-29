@@ -4,6 +4,7 @@ import time
 import re
 import math
 import smtplib
+import sqlite3
 from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage

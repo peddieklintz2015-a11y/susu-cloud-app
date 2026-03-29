@@ -233,20 +233,28 @@ if not combined_df.empty:
 else:
     st.write("No data to display yet.")
 
-    # --- 5.5 COMPACT LIVE SYSTEM OVERVIEW ---
-with st.expander("📊 View System Quick Stats", expanded=True):
-    # Use 3 columns for a single row layout
-    c1, c2, c3 = st.columns(3)
-    
-    # Calculate values safely
-    cl_count = len(clients) if 'clients' in locals() and not clients.empty else 0
-    tr_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
-    vt_total = contributions['amount'].sum() if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns else 0.0
+    # --- 5.5 SHRUNK LIVE SYSTEM OVERVIEW ---
+st.markdown("""
+    <style>
+    /* This shrinks the font size of the metrics at the top */
+    [data-testid="stMetricValue"] {
+        font-size: 18px !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 14px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Displaying them as smaller text instead of big Metrics
-    c1.write(f"👥 **Clients:** {cl_count}")
-    c2.write(f"📝 **Transactions:** {tr_count}")
-    c3.write(f"💰 **Vault:** GHS {vt_total:,.2f}")
+s_col1, s_col2, s_col3 = st.columns(3)
+
+with s_col1:
+    st.metric("Clients", len(clients) if not clients.empty else 0)
+with s_col2:
+    st.metric("Transactions", len(contributions) if not contributions.empty else 0)
+with s_col3:
+    v_amt = contributions['amount'].sum() if not contributions.empty else 0.0
+    st.metric("Vault", f"GHS {v_amt:,.2f}")
 
 st.divider()
 

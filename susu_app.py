@@ -389,24 +389,20 @@ if choice == "📊 Dashboard":
     # 1. Header & Refresh Control
     head_col, btn_col = st.columns([4, 2])
     with head_col:
-     st.title("📊 Financial Overview")
+        st.title("📊 Financial Overview")
 
     with btn_col:
-     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 Sync & Refresh"):
-        # 1. Clear the Streamlit Cache
-        st.cache_data.clear()
-        
-        # 2. Show a native-style mobile notification
-        st.toast("Syncing with Cloud Database...", icon="☁️")
-        
-        # 3. Small delay for visual feedback, then rerun
-        time.sleep(0.5)
-        st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Sync & Refresh"):
+            # Clear the Streamlit Cache to pull fresh data
+            st.cache_data.clear()
+            # Show a native-style mobile notification
+            st.toast("Syncing with Cloud Database...", icon="☁️")
+            time.sleep(0.5)
+            st.rerun()
     
-    # 2. Latest Member Alert - UPDATED with safety check
+    # 2. Latest Member Alert
     if 'clients' in locals() and not clients.empty:
-        # Use .iloc[-1] safely
         last_row = clients.tail(1).iloc[0]
         st.success(f"🆕 *Latest Member Registered:* {last_row['client_name']} (ID: {last_row.get('client_id', 'N/A')})")
         total_client_count = len(clients)
@@ -418,7 +414,6 @@ if choice == "📊 Dashboard":
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
-    # Check if contributions exists and has data
     if 'contributions' in locals() and not contributions.empty:
         total_vault = contributions['amount'].sum()
         total_commissions = contributions['fee'].sum()
@@ -431,7 +426,6 @@ if choice == "📊 Dashboard":
         # 4. Monthly Profit Chart
         st.subheader("📈 Monthly Commission Growth")
         chart_df = contributions.copy()
-        # Convert date to datetime if it isn't already
         chart_df['date'] = pd.to_datetime(chart_df['date'])
         chart_df['Month'] = chart_df['date'].dt.strftime('%b %Y')
         monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
@@ -444,122 +438,118 @@ if choice == "📊 Dashboard":
         
         if not today_logs.empty:
             today_logs['Time'] = today_logs['date'].dt.strftime('%I:%M %p')
-            # Select only columns that definitely exist
             cols_to_show = [c for c in ['Time', 'client_name', 'amount', 'marks_covered'] if c in today_logs.columns]
             display_logs = today_logs[cols_to_show].sort_values(by='Time', ascending=False)
             st.table(display_logs)
         else:
             st.info("No transactions recorded yet today.")
-            
     else:
-        # UPDATED: Hard-coded zeros when tables are empty
         m2.metric("💰 Total Vault", "GHS 0.00")
         m3.metric("📈 Commissions", "GHS 0.00")
         m4.metric("📉 Net Liability", "GHS 0.00")
         st.warning("🚨 No transaction records found in the system.")
 
 elif choice == "💸 Transactions":
-        st.title("💸 Record Transactions")
+    st.title("💸 Record Transactions")
+    
+    if not clients.empty:
+        # 1. Select Client
+        client_list = clients['client_name'].tolist()
+        target = st.selectbox("Select Client", client_list)
         
-        if not clients.empty:
-            # 1. Select Client
-            client_list = clients['client_name'].tolist()
-            target = st.selectbox("Select Client", client_list)
-            
-            client_row = clients[clients['client_name'] == target].iloc[0]
-            d_mark = float(client_row['daily_mark'])
-            
-            # --- DATA RETRIEVAL ---
-            if not contributions.empty and 'client_name' in contributions.columns:
-                user_history = contributions[contributions['client_name'] == target]
-                total_saved_ghs = float(user_history['amount'].sum())
-                total_marks_saved = int(user_history['marks_covered'].sum())
+        client_row = clients[clients['client_name'] == target].iloc[0]
+        d_mark = float(client_row['daily_mark'])
+        
+        # --- DATA RETRIEVAL ---
+        if not contributions.empty and 'client_name' in contributions.columns:
+            user_history = contributions[contributions['client_name'] == target]
+            total_saved_ghs = float(user_history['amount'].sum())
+            total_marks_saved = int(user_history['marks_covered'].sum())
+        else:
+            user_history = pd.DataFrame()
+            total_saved_ghs = 0.0
+            total_marks_saved = 0
+        
+        # --- PROGRESS TRACKER (FIXED EXCEPTIONS) ---
+        try:
+            current_cycle_marks = float(total_marks_saved % 31)
+            progress_val = current_cycle_marks / 31.0
+            safe_progress = float(max(0.0, min(progress_val, 1.0)))
+        except (ZeroDivisionError, TypeError, ValueError):
+            current_cycle_marks = 0.0
+            safe_progress = 0.0
+        
+        st.write(f"📊 *Current Month Progress:* **{int(current_cycle_marks)}/31** Marks")
+        st.progress(safe_progress)
+        st.write(f"💰 **Total Balance:** GHS {total_saved_ghs:,.2f}")
+
+        st.divider()
+
+        # --- 2. TRANSACTION INPUTS ---
+        ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
+        
+        # BACKDATING / MIGRATION LOGIC
+        is_migration = st.checkbox("Migrate Old Data (Backdate)")
+        if is_migration:
+            selected_date = st.date_input("Select Transaction Date", value=datetime.now().date())
+            trans_date = datetime.combine(selected_date, datetime.now().time())
+        else:
+            trans_date = datetime.now()
+
+        can_save = True
+        db_amt, db_marks, db_fee = 0.0, 0, 0.0
+
+        if ttype == "Deposit":
+            num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
+            db_amt = float(num_marks * d_mark)
+            db_marks = num_marks
+            st.info(f"💰 Value: GHS {db_amt:,.2f} | 📈 Marks: +{num_marks}")
+        
+        else: # Withdrawal logic
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
+            if is_migration:
+                db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
             else:
-                user_history = pd.DataFrame()
-                total_saved_ghs = 0.0
-                total_marks_saved = 0
-            
-            # --- PROGRESS TRACKER (FIXED & SAFE) ---
-            try:
-                # Modulo 31 to find marks in the current cycle
-                current_cycle_marks = float(total_marks_saved % 31)
-                progress_val = current_cycle_marks / 31.0
-                
-                # Clamping ensures the value is ALWAYS between 0.0 and 1.0
-                # This prevents the StreamlitAPIException crash
-                safe_progress = float(max(0.0, min(progress_val, 1.0)))
-                
-            except (ZeroDivisionError, TypeError, ValueError):
-                # Only runs if there's a math issue or data is None
-                current_cycle_marks = 0.0
-                safe_progress = 0.0
-            
-            st.write(f"📊 Current Month Progress: *{int(current_cycle_marks)}/31* Marks")
-            st.progress(safe_progress)
-
-            # --- RECENT HISTORY FOR THIS CLIENT ---
-            with st.expander("🕒 View Client's Recent Transactions", expanded=False):
-                if not user_history.empty:
-                    # Show only last 5 for this specific client
-                    hist_disp = user_history.sort_values('date', ascending=False).head(5).copy()
-                    hist_disp['date'] = pd.to_datetime(hist_disp['date']).dt.strftime('%Y-%m-%d %H:%M')
-                    st.dataframe(hist_disp[['date', 'amount', 'marks_covered']], use_container_width=True, hide_index=True)
-                else:
-                    st.info("No history found for this client.")
-
-            st.divider()
-
-            # 2. Transaction Inputs
-            ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
-            can_save = True
-            db_amt, db_marks, db_fee = 0.0, 0, 0.0
-
-            if ttype == "Deposit":
-                num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
-                db_amt = float(num_marks * d_mark)
-                db_marks = num_marks
-                st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
-            
-            else: # Withdrawal
-                requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
-                # Fee calculation (1 day mark per month/cycle)
+                # Automatic Fee calculation: 1 mark per cycle/month
                 months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
                 db_fee = float(months_count * d_mark)
-                
-                total_deduction = requested_cash + db_fee
-                db_amt = -requested_cash 
-                
-                if requested_cash > 0:
-                    if total_deduction > total_saved_ghs:
-                        st.error(f"⚠️ Insufficient Balance! (Needed: GHS {total_deduction:,.2f})")
-                        can_save = False
-                    else:
-                        st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Fee")
-
-            # --- 3. THE SYNC BUTTON ---
-            if st.button("🚀 Confirm & Sync Transaction"):
-                if can_save and db_amt != 0:
-                    new_entry = {
-                        'amount': db_amt,
-                        'client_name': target,
-                        'date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'fee': db_fee,
-                        'id': len(contributions) + 1,
-                        'marks_covered': db_marks,
-                        'client_id': client_row['client_id']
-                    }
-
-                    # Call the helper function
-                    contributions, success = sync_data(new_entry, contributions)
-
-                    if success:
-                        st.cache_data.clear() # THIS IS THE KEY: Forces fetch_data to see the withdrawal
-                        st.success(f"✅ Withdrawal of GHS {abs(db_amt)} recorded!")
-                        st.rerun()
+            
+            total_deduction = requested_cash + db_fee
+            
+            if requested_cash > 0:
+                if total_deduction > (total_saved_ghs + 0.01):
+                    st.error(f"⚠️ Insufficient Balance! (Available: GHS {total_saved_ghs:,.2f})")
+                    can_save = False
                 else:
-                    st.error("Invalid amount or check balance.")
-        else:
-            st.warning("Please register clients first.")                 
+                    # Withdrawal recorded as negative total (Cash + Fee)
+                    db_amt = -(requested_cash + db_fee)
+                    st.warning(f"Deducting Total: GHS {total_deduction:,.2f} (Cash + Fee)")
+
+        # --- 3. THE SYNC BUTTON ---
+        if st.button("🚀 Confirm & Sync Transaction"):
+            if can_save and (db_amt != 0):
+                new_entry = {
+                    'amount': db_amt,
+                    'client_name': target,
+                    'date': trans_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'fee': db_fee,
+                    'id': len(contributions) + 1,
+                    'marks_covered': db_marks if ttype == "Deposit" else 0,
+                    'client_id': client_row['client_id']
+                }
+
+                # Running your dual sync helper function
+                contributions, success = sync_data(new_entry, contributions)
+
+                if success:
+                    st.cache_data.clear() 
+                    st.success(f"✅ Recorded {ttype} for {target}!")
+                    st.balloons()
+                    st.rerun()
+            else:
+                st.error("Invalid amount or check balance.")
+    else:
+        st.warning("Please register clients first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")

@@ -466,6 +466,7 @@ elif choice == "🛠 Admin Tools":
     
     with t1:
         st.subheader("👤 Register New Client")
+        # Keep camera outside the form
         photo = st.camera_input("Take Client Photo (Required)")
     
         with st.form("reg_form", clear_on_submit=True):
@@ -474,36 +475,44 @@ elif choice == "🛠 Admin Tools":
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
             reg_date = st.date_input("Registration Date", value=datetime.now())
             
+            # Show the ID they are about to get
             suggested_id = get_next_gen_id(reg_date)
             st.info(f"Next Available ID: {suggested_id}")
             
             submit = st.form_submit_button("Register to Cloud")
             
             if submit: 
-                if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ All fields (Name, Phone, and Photo) are required")
+                # Validation check
+                if not name.strip() or not phone.strip():
+                    st.error("❌ Name and Phone are required.")
+                elif photo is None:
+                    st.error("📸 Please take a photo first!")
                 else:
                     try:
                         gen_id = get_next_gen_id(reg_date)
-                        # Format filename for storage
-                        file_path = f"{gen_id.replace('/', '_')}.jpg"
+                        # Create a safe filename (remove slashes/spaces)
+                        file_name = f"{gen_id.replace('/', '').replace(' ', '')}.jpg"
                         
                         # 1. Upload Photo to Supabase Storage
+                        # Added 'upsert': True to overwrite if the file exists
                         sb_client.storage.from_("client-photos").upload(
-                            path=file_path,
+                            path=file_name,
                             file=photo.getvalue(),
-                            file_options={"content-type": "image/jpeg"}
+                            file_options={"content-type": "image/jpeg", "upsert": "true"}
                         )
 
-                        # 2. Construct Public URL
-                        p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{file_path}"
+                        # 2. Construct Public URL 
+                        # Ensure your bucket "client-photos" is set to PUBLIC in Supabase
+                        base_url = st.secrets['supabase_url']
+                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{file_name}"
 
-                        # 3. Save to SQL Database
+                        # 3. Save to SQL Database using the connection session
                         with conn.session as s:
-                            s.execute(text("""
+                            query = text("""
                                 INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                 VALUES (:i, :n, :p, :d, :u)
-                            """), {
+                            """)
+                            s.execute(query, {
                                 "i": gen_id, 
                                 "n": name.strip(), 
                                 "p": phone.strip(), 
@@ -514,10 +523,13 @@ elif choice == "🛠 Admin Tools":
                         
                         st.success(f"✅ Registered {name} successfully!")
                         st.balloons()
-                        time.sleep(1)
+                        # Small delay so user sees success before rerun
+                        time.sleep(2)
                         st.rerun()
+                        
                     except Exception as e:
-                        st.error(f"🚨 Registration Failed: {e}")
+                        # This will catch if the bucket name is wrong or DB columns mismatch
+                        st.error(f"🚨 Registration Failed: {str(e)}")
 
     with t2:
         st.subheader("📊 Weekly Executive Intelligence")

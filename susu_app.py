@@ -233,27 +233,27 @@ if not combined_df.empty:
 else:
     st.write("No data to display yet.")
 
-    # --- 5.5 LIVE SYSTEM OVERVIEW (TOP OF APP) ---
+        # --- 5.5 LIVE SYSTEM OVERVIEW (TOP OF APP) ---
 # This stays visible above the navigation menu
-st.markdown("### 📊 Live System Overview")
-col_a, col_b, col_c = st.columns(3)
+    st.markdown("### 📊 Live System Overview")
+    col_a, col_b, col_c = st.columns(3)
 
-with col_a:
-    total_clients_count = len(clients) if 'clients' in locals() and not clients.empty else 0
+    with col_a:
+     total_clients_count = len(clients) if 'clients' in locals() and not clients.empty else 0
     st.metric("Total Clients", f"{total_clients_count}")
 
-with col_b:
-    total_trans_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
+    with col_b:
+     total_trans_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
     st.metric("Transactions", f"{total_trans_count}")
 
-with col_c:
-    if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns:
+    with col_c:
+     if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns:
         total_vault_amt = contributions['amount'].sum()
         st.metric("Total Vault", f"GHS {total_vault_amt:,.2f}")
-    else:
+     else:
         st.metric("Total Vault", "GHS 0.00")
 
-st.divider()
+    st.divider()
 
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()

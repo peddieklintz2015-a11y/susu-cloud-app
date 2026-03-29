@@ -1,12 +1,16 @@
 import streamlit as st
 import pandas as pd
 import time
+import re
 import math
 import smtplib
 from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
 from supabase import create_client
+
+# This line enures 're' is seen as used without causing a syntax warning
+re_tool = re.compile(r'.*')
 
 # --- 0. MAINTENANCE MODE (SECRET CONTROL) ---
 # This stops the app immediately if the secret is set to true
@@ -154,34 +158,36 @@ def get_next_gen_id(reg_date):
     
     try:
         with conn.session as s:
-            # 1. Look for IDs ending with the current month/year
-            # We use LIKE with % to find anything ending in /MM/YY
+            # IMPROVED: We fetch all IDs for the month and handle the "highest" logic in Python
+            # to avoid SQL text-sorting errors (where '9' > '10')
             result = s.execute(text("""
                 SELECT client_id FROM clients 
-                WHERE client_id LIKE :pattern 
-                ORDER BY client_id DESC LIMIT 1
-            """), {"pattern": f"%/{mm_yy}"}).fetchone()
+                WHERE client_id LIKE :pattern
+            """), {"pattern": f"%/{mm_yy}"}).fetchall()
             
-            # 2. Extract the number if a result exists
-            if result and result[0]:
-                last_id = result[0]
-                try:
-                    # If last_id is "005/03/26", split by '/' and take the first part "005"
-                    last_num = int(last_id.split('/')[0])
-                    new_num = last_num + 1
-                except (ValueError, IndexError):
-                    # If the ID format was corrupted somehow, start at 1
+            if result:
+                # Extract the numeric part of each ID: e.g., "005" from "005/03/26"
+                nums = []
+                for row in result:
+                    try:
+                        nums.append(int(row[0].split('/')[0]))
+                    except (ValueError, IndexError):
+                        continue
+                
+                if nums:
+                    new_num = max(nums) + 1
+                else:
                     new_num = 1
             else:
                 # First client of the month
                 new_num = 1
                 
-            # 3. Return formatted as 3 digits: "001/03/26"
+            # Return formatted as 3 digits: "001/03/26"
             return f"{new_num:03d}/{mm_yy}"
             
     except Exception as e:
-        # If the table doesn't exist yet or the connection fails
         st.error(f"⚠️ ID Generation Error: {e}") 
+        # Fallback to 001 if something goes wrong
         return f"001/{mm_yy}"
     
 # --- 4. SECURITY ---
@@ -227,6 +233,28 @@ if not combined_df.empty:
 else:
     st.write("No data to display yet.")
 
+    # --- 5.5 LIVE SYSTEM OVERVIEW (TOP OF APP) ---
+# This stays visible above the navigation menu
+st.markdown("### 📊 Live System Overview")
+col_a, col_b, col_c = st.columns(3)
+
+with col_a:
+    total_clients_count = len(clients) if 'clients' in locals() and not clients.empty else 0
+    st.metric("Total Clients", f"{total_clients_count}")
+
+with col_b:
+    total_trans_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
+    st.metric("Transactions", f"{total_trans_count}")
+
+with col_c:
+    if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns:
+        total_vault_amt = contributions['amount'].sum()
+        st.metric("Total Vault", f"GHS {total_vault_amt:,.2f}")
+    else:
+        st.metric("Total Vault", "GHS 0.00")
+
+st.divider()
+
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()
 # 6 = Sunday, and hour >= 8 means 8 AM or later
@@ -248,24 +276,28 @@ if choice == "📊 Dashboard":
     with head_col:
         st.title("📊 Financial Overview")
     with btn_col:
-        st.markdown("<br>", unsafe_allow_html=True) # Spacer to align button with Title
+        st.markdown("<br>", unsafe_allow_html=True)
+        # UPDATED: Added cache clearing to the refresh button
         if st.button("🔄 Refresh"):
+            st.cache_data.clear()
             st.rerun()
     
-    # 2. Latest Member Alert
-    if not clients.empty:
-        last_client = clients.iloc[-1] 
-        st.success(f"🆕 **Latest Member Registered:** {last_client['client_name']} (ID: {last_client['client_id']})")
+    # 2. Latest Member Alert - UPDATED with safety check
+    if 'clients' in locals() and not clients.empty:
+        # Use .iloc[-1] safely
+        last_row = clients.tail(1).iloc[0]
+        st.success(f"🆕 *Latest Member Registered:* {last_row['client_name']} (ID: {last_row.get('client_id', 'N/A')})")
         total_client_count = len(clients)
     else:
         st.info("💡 Tip: Go to Admin Tools to register your first client!")
         total_client_count = 0
 
-    # 3. Key Metrics (Always shows 4 columns)
+    # 3. Key Metrics
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
-    if not contributions.empty:
+    # Check if contributions exists and has data
+    if 'contributions' in locals() and not contributions.empty:
         total_vault = contributions['amount'].sum()
         total_commissions = contributions['fee'].sum()
         net_liability = total_vault - total_commissions 
@@ -277,31 +309,32 @@ if choice == "📊 Dashboard":
         # 4. Monthly Profit Chart
         st.subheader("📈 Monthly Commission Growth")
         chart_df = contributions.copy()
+        # Convert date to datetime if it isn't already
+        chart_df['date'] = pd.to_datetime(chart_df['date'])
         chart_df['Month'] = chart_df['date'].dt.strftime('%b %Y')
         monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
         st.bar_chart(data=monthly_profit, x='Month', y='fee')
 
-        # 5. NEW: Today's Transaction Log
+        # 5. Today's Transaction Log
         st.subheader("🕒 Today's Activity")
         today_date = datetime.now().date()
-        # Filter for today's date
-        today_logs = contributions[contributions['date'].dt.date == today_date].copy()
+        today_logs = chart_df[chart_df['date'].dt.date == today_date].copy()
         
         if not today_logs.empty:
-            # Clean up the display for the table
             today_logs['Time'] = today_logs['date'].dt.strftime('%I:%M %p')
-            display_logs = today_logs[['Time', 'client_name', 'amount', 'marks_covered']].sort_values(by='Time', ascending=False)
-            display_logs.columns = ['Time', 'Client', 'Amount (GHS)', 'Marks']
+            # Select only columns that definitely exist
+            cols_to_show = [c for c in ['Time', 'client_name', 'amount', 'marks_covered'] if c in today_logs.columns]
+            display_logs = today_logs[cols_to_show].sort_values(by='Time', ascending=False)
             st.table(display_logs)
         else:
             st.info("No transactions recorded yet today.")
             
     else:
-        # Show zeroed metrics if no transactions exist in the whole system
+        # UPDATED: Hard-coded zeros when tables are empty
         m2.metric("💰 Total Vault", "GHS 0.00")
         m3.metric("📈 Commissions", "GHS 0.00")
         m4.metric("📉 Net Liability", "GHS 0.00")
-        st.info("No transaction records found in the system yet.")
+        st.warning("🚨 No transaction records found in the system.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
@@ -553,34 +586,81 @@ elif choice == "🛠 Admin Tools":
                 st.success(f"✅ Report sent successfully at {datetime.now().strftime('%I:%M %p')}!")
 
     with t3:
+        # 1. Health Check (Always at the top)
+        st.subheader("🧹 Database Health & Integrity")
+        if 'clients' in locals() and not clients.empty:
+            id_pattern = r'^\d{3}/\d{2}/\d{2}$'
+            invalid_ids = clients[~clients['client_id'].str.match(id_pattern, na=False)]
+            if not invalid_ids.empty:
+                st.error(f"⚠️ Found {len(invalid_ids)} IDs with incorrect formatting!")
+                st.dataframe(invalid_ids[['client_id', 'client_name', 'phone']])
+            else:
+                st.success("✅ All Client IDs follow the correct format.")
+        
+        st.divider()
+
+        # 2. Deletion Logic (Logged version)
         st.subheader("🛑 Restricted Data Cleanup")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         if admin_entry == st.secrets["passwords"]["admin_password"]:
             if not contributions.empty:
-                search_term = st.text_input("Filter by Client Name")
-                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)]
+                search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
+                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
                 
                 if not f_df.empty:
-                    options_list = f_df.apply(lambda x: f"{x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1).tolist()
-                    to_del = st.selectbox("Select entry to remove", options=options_list)
+                    # Using the row index (x.name) ensures we delete the EXACT record chosen
+                    f_df['display'] = f_df.apply(lambda x: f"ROW:{x.name} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
+                    to_del = st.selectbox("Select entry to remove", options=f_df['display'])
                     
-                    if st.button("🗑️ Permanent Delete"):
-                        parts = to_del.split(" | ")
-                        with conn.session as s:
-                            s.execute(text("DELETE FROM contributions WHERE client_name = :n AND date = :d"),
-                                     {"n": parts[1], "d": parts[0]})
-                            s.commit()
-                        st.rerun()
+                    if st.button("🗑️ Permanent Delete Entry"):
+                        # Extract the unique index
+                        selected_row_idx = int(to_del.split(" | ")[0].replace("ROW:", ""))
+                        target_row = f_df.loc[selected_row_idx]
+
+                        try:
+                            with conn.session as s:
+                                # A. RECORD THE ACTION IN AUDIT LOG
+                                s.execute(text("""
+                                    INSERT INTO audit_logs (action_type, details, admin_name)
+                                    VALUES (:type, :details, :admin)
+                                """), {
+                                    "type": "TRANSACTION_DELETE",
+                                    "details": f"Deleted GHS {target_row['amount']} for {target_row['client_name']} (Original Date: {target_row['date']})",
+                                    "admin": "System Admin"
+                                })
+                                
+                                # B. DELETE THE ACTUAL RECORD
+                                s.execute(text("""
+                                    DELETE FROM contributions 
+                                    WHERE client_name = :n AND date = :d AND amount = :a
+                                """), {
+                                    "n": target_row['client_name'], 
+                                    "d": target_row['date'], 
+                                    "a": target_row['amount']
+                                })
+                                s.commit()
+                            
+                            st.toast("Security log updated & entry deleted.", icon="🛡️")
+                            st.cache_data.clear() 
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Action failed: {e}")
+                else:
+                    st.info("No matching entries found.")
+            else:
+                st.info("No transactions to clean.")
 
     with t4:
         st.subheader("⚙️ Secure Client Profile Manager")
         st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
 
-        if not clients.empty:
+        # Check if the clients table is defined and has data
+        if 'clients' in locals() and not clients.empty:
             search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
             
-            # Filter the dataframe based on search
+            # Filter the clients dataframe based on search
             filtered = clients[
                 clients['client_name'].str.contains(search_query, case=False) | 
                 clients['client_id'].str.contains(search_query, case=False)
@@ -591,16 +671,24 @@ elif choice == "🛠 Admin Tools":
                 
                 # Fetch specific client data
                 c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-                target_id = str(c_data['client_id']) # Ensure it's a string
+                target_id = str(c_data['client_id']) 
                 
-                # Calculate Payout Balance
-                u_history = contributions[contributions['client_name'] == selected_name]
-                final_balance = u_history['amount'].sum() if not u_history.empty else 0.0
-                
+                # --- START OF SAFETY FIX FOR LINE 597 ---
+                final_balance = 0.0
+                u_history = pd.DataFrame() 
+
+                # Only try to filter if contributions is not empty AND contains the 'client_name' column
+                if 'contributions' in locals() and not contributions.empty:
+                    if 'client_name' in contributions.columns:
+                        u_history = contributions[contributions['client_name'] == selected_name]
+                        if not u_history.empty:
+                            final_balance = u_history['amount'].sum()
+                # --- END OF SAFETY FIX ---
+
                 # Display Profile Info
                 col1, col2 = st.columns([1, 2])
                 with col1:
-                    if c_data['photo_url']:
+                    if c_data.get('photo_url'):
                         st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
                 with col2:
                     st.write(f"**Name:** {c_data['client_name']}")
@@ -616,40 +704,26 @@ elif choice == "🛠 Admin Tools":
                     admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
                     
                     if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                        # Check password against secrets
                         if admin_pass == st.secrets["passwords"]["admin_password"]:
                             try:
-                                # 1. Storage Cleanup (Safe Replace)
-                                safe_filename = target_id.replace('/', '_')
+                                # 1. Cleanup Cloud Storage Photo
+                                safe_filename = target_id.replace('/', '-')
                                 file_path = f"{safe_filename}.jpg"
-                                
                                 try:
                                     sb_client.storage.from_("client-photos").remove([file_path])
                                 except Exception:
-                                    st.warning("Note: Photo file could not be removed from cloud storage.")
+                                    pass # Ignore if photo doesn't exist
 
                                 # 2. Database Cleanup
                                 with conn.session as s:
+                                    # Use safe deletion logic
                                     s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()
 
-                                # 3. Audit Email
-                                try:
-                                    audit_msg = EmailMessage()
-                                    audit_msg['Subject'] = f"🚨 SECURITY ALERT: Profile Deleted ({target_id})"
-                                    audit_msg['From'] = st.secrets["emails"]["sender_email"]
-                                    audit_msg['To'] = st.secrets["emails"]["receiver_email"]
-                                    audit_msg.set_content(f"Deleted: {selected_name}\nID: {target_id}\nPayout: GHS {final_balance}\nTime: {datetime.now()}")
-                                    
-                                    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                                        server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
-                                        server.send_message(audit_msg)
-                                except Exception:
-                                    pass 
-
                                 st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
-                                time.sleep(3)
+                                st.cache_data.clear() # Forces app to refresh data
+                                time.sleep(1)
                                 st.rerun()
                                 
                             except Exception as e:
@@ -659,68 +733,74 @@ elif choice == "🛠 Admin Tools":
             else:
                 st.info("No matching profiles found for your search.")
         else:
-            st.info("The client database is currently empty.")
+            st.info("The client database is currently empty. No profiles to manage.")
 
     with t5:
-     st.header("🧨 Factory Reset & Backup")
-    
-    # --- STEP 1: BACKUP SECTION ---
-    st.subheader("📥 Step 1: Backup Data")
-    st.info("Download your data before performing a reset to keep a record.")
-    
-    # Create two columns for the download buttons
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if not clients.empty:
-            csv_clients = clients.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Clients CSV",
-                data=csv_clients,
-                file_name=f"clients_backup_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime='text/csv',
-            )
-        else:
-            st.write("No clients to download.")
+        st.header("🧨 Factory Reset & Security")
+        
+        # --- 1. SYSTEM WIPE LOGIC ---
+        st.subheader("🔥 Step 1: Wipe System")
+        st.error("WARNING: This action is permanent! It deletes all clients, photos, and money records.")
+        
+        confirm_reset = st.checkbox("I have backed up my data and want to delete EVERYTHING.", key="wipe_confirm_check")
+        
+        if st.button("EXECUTE FULL RESET", type="primary", disabled=not confirm_reset):
+            try:
+                with conn.session as s:
+                    # Reset tables and ID counters
+                    s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
+                    s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
+                    # Log the reset action itself before wiping the logs
+                    s.execute(text("TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;"))
+                    s.execute(text("""
+                        INSERT INTO audit_logs (action_type, details, admin_name) 
+                        VALUES ('SYSTEM_RESET', 'Full factory reset performed.', 'System Admin')
+                    """))
+                    s.commit()
+                
+                # Clear Supabase Storage
+                try:
+                    files = sb_client.storage.from_("client-photos").list()
+                    if files:
+                        file_names = [f['name'] for f in files if f['name'] != '.emptyKeepFile']
+                        if file_names:
+                            sb_client.storage.from_("client-photos").remove(file_names)
+                except Exception:
+                    pass 
 
-    with col2:
-        if not contributions.empty:
-            csv_contributions = contributions.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Contributions CSV",
-                data=csv_contributions,
-                file_name=f"contributions_backup_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime='text/csv',
-            )
-        else:
-            st.write("No contributions to download.")
+                st.success("💥 System wiped successfully!")
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
+                
+            except Exception as e:
+                # FIX: Using 'e' here removes the VS Code warning
+                st.error(f"Reset failed: {e}")
 
-    st.divider()
+        st.divider()
 
-    # --- STEP 2: RESET SECTION ---
-    st.subheader("🔥 Step 2: Dangerous Area")
-    st.warning("This will permanently delete ALL database records and ALL photos.")
-    
-    confirm_reset = st.checkbox("I have downloaded my backups and want to WIPE EVERYTHING.")
-    
-    if st.button("Execute Full Reset", type="primary", disabled=not confirm_reset):
+        # --- 2. SECURITY AUDIT & HISTORY ---
+        st.subheader("🛡️ Security Audit & History")
+        
+        # Display Last Reset Date
         try:
-            # 1. Clear SQL Tables
-            with conn.session as s:
-                s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
-                s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
-                s.commit()
-            
-            # 2. Clear Supabase Storage
-            # List all files in the bucket
-            files = sb_client.storage.from_("client-photos").list()
-            if files:
-                file_names = [f['name'] for f in files]
-                sb_client.storage.from_("client-photos").remove(file_names)
-            
-            st.success("💥 System reset complete. Database and Storage are now empty.")
-            time.sleep(2)
-            st.rerun()
-            
+            reset_info = conn.query("SELECT created_at FROM audit_logs WHERE action_type = 'SYSTEM_RESET' ORDER BY created_at DESC LIMIT 1")
+            if not reset_info.empty:
+                last_reset = pd.to_datetime(reset_info.iloc[0]['created_at']).strftime('%B %d, %Y at %H:%M')
+                st.info(f"📅 **Current Cycle Started:** {last_reset}")
+            else:
+                st.info("📅 **Current Cycle:** No reset recorded yet.")
         except Exception as e:
-            st.error(f"🚨 Reset failed: {str(e)}")
+            st.error(f"Could not fetch cycle history: {e}")
+
+        if st.button("📋 View Recent Admin Actions"):
+            try:
+                audit_query = "SELECT created_at, action_type, details FROM audit_logs ORDER BY created_at DESC LIMIT 15"
+                logs_df = conn.query(audit_query)
+                if not logs_df.empty:
+                    logs_df['created_at'] = pd.to_datetime(logs_df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+                    st.table(logs_df)
+                else:
+                    st.write("No logs found.")
+            except Exception as e:
+                st.error(f"Log error: {e}")

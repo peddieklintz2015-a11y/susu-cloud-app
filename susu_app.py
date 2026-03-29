@@ -204,7 +204,28 @@ if not check_password():
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()
-combined_df = pd.merge(contributions, clients[['client_id', 'client_name']], on='client_name', how='left') if not clients.empty else contributions
+if clients.empty:
+    # If no clients exist, we can't merge IDs or Names
+    st.info("💡 No clients found. Register a client to see reports.")
+    combined_df = contributions  # Keep it as is so the app doesn't crash
+else:
+    # Only run this if 'clients' actually contains the columns 'client_id' and 'client_name'
+    try:
+        combined_df = pd.merge(
+            contributions, 
+            clients[['client_id', 'client_name']], 
+            on='client_name', 
+            how='left'
+        )
+    except KeyError as e:
+        st.error(f"Missing column in Database: {e}")
+        combined_df = contributions
+
+# --- DISPLAY DATA ---
+if not combined_df.empty:
+    st.dataframe(combined_df)
+else:
+    st.write("No data to display yet.")
 
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()
@@ -462,7 +483,7 @@ elif choice == "📑 Digital Passbook":
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
        # FIX: This line defines t4. Ensure it exists before "with t4:"
-    t1, t2, t3, t4 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile"])
+    t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
     with t1:
         st.subheader("👤 Register New Client")
@@ -639,3 +660,67 @@ elif choice == "🛠 Admin Tools":
                 st.info("No matching profiles found for your search.")
         else:
             st.info("The client database is currently empty.")
+
+    with t5:
+     st.header("🧨 Factory Reset & Backup")
+    
+    # --- STEP 1: BACKUP SECTION ---
+    st.subheader("📥 Step 1: Backup Data")
+    st.info("Download your data before performing a reset to keep a record.")
+    
+    # Create two columns for the download buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if not clients.empty:
+            csv_clients = clients.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Clients CSV",
+                data=csv_clients,
+                file_name=f"clients_backup_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime='text/csv',
+            )
+        else:
+            st.write("No clients to download.")
+
+    with col2:
+        if not contributions.empty:
+            csv_contributions = contributions.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Contributions CSV",
+                data=csv_contributions,
+                file_name=f"contributions_backup_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime='text/csv',
+            )
+        else:
+            st.write("No contributions to download.")
+
+    st.divider()
+
+    # --- STEP 2: RESET SECTION ---
+    st.subheader("🔥 Step 2: Dangerous Area")
+    st.warning("This will permanently delete ALL database records and ALL photos.")
+    
+    confirm_reset = st.checkbox("I have downloaded my backups and want to WIPE EVERYTHING.")
+    
+    if st.button("Execute Full Reset", type="primary", disabled=not confirm_reset):
+        try:
+            # 1. Clear SQL Tables
+            with conn.session as s:
+                s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
+                s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
+                s.commit()
+            
+            # 2. Clear Supabase Storage
+            # List all files in the bucket
+            files = sb_client.storage.from_("client-photos").list()
+            if files:
+                file_names = [f['name'] for f in files]
+                sb_client.storage.from_("client-photos").remove(file_names)
+            
+            st.success("💥 System reset complete. Database and Storage are now empty.")
+            time.sleep(2)
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"🚨 Reset failed: {str(e)}")

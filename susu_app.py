@@ -424,23 +424,35 @@ if choice == "📊 Dashboard":
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
+    # Check if we actually have clients to select from
     if not clients.empty:
-        # 1. Select Client and Get Data
-        target = st.selectbox("Select Client", clients['client_name'].tolist())
+        # 1. Select Client
+        client_list = clients['client_name'].tolist()
+        target = st.selectbox("Select Client", client_list)
+        
+        # Get specific data for the selected client
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row['daily_mark'])
         c_phone = str(client_row['phone']) 
         
-        user_history = contributions[contributions['client_name'] == target]
-        total_saved_ghs = user_history['amount'].sum()
-        total_marks_saved = user_history['marks_covered'].sum() 
+        # --- SAFETY FIX: Handle history even if contributions is empty ---
+        if not contributions.empty and 'client_name' in contributions.columns:
+            user_history = contributions[contributions['client_name'] == target]
+            total_saved_ghs = user_history['amount'].sum() if 'amount' in user_history.columns else 0.0
+            total_marks_saved = user_history['marks_covered'].sum() if 'marks_covered' in user_history.columns else 0
+        else:
+            # Default values for a brand new system with no records
+            user_history = pd.DataFrame()
+            total_saved_ghs = 0.0
+            total_marks_saved = 0
         
         # --- PROGRESS TRACKER ---
         current_cycle_marks = total_marks_saved % 31
         progress_percent = min(current_cycle_marks / 31, 1.0)
-        st.write(f"📊 **Current Month Progress:** {int(current_cycle_marks)}/31 Marks")
+        st.write(f"📊 *Current Month Progress:* {int(current_cycle_marks)}/31 Marks")
         st.progress(progress_percent)
 
+        # 2. Transaction Inputs
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
         can_save = True
         db_amt, db_marks, db_fee = 0.0, 0, 0.0
@@ -452,11 +464,12 @@ elif choice == "💸 Transactions":
             st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
         else:
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
+            # Service Fee is usually 1 day's mark per month saved
             months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
             db_fee = months_count * d_mark
             
             total_deduction = requested_cash + db_fee
-            db_amt = -requested_cash 
+            db_amt = -requested_cash # Negative for withdrawal
             
             if requested_cash > 0:
                 if total_deduction > total_saved_ghs:
@@ -465,36 +478,41 @@ elif choice == "💸 Transactions":
                 else:
                     st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee")
 
-        # 2. Confirm and Save Logic
-        if st.button("Confirm & Save"):
+        # 3. Save Execution
+        if st.button("Confirm & Save Transaction"):
             if not can_save:
                 st.error("Cannot save. Check balance or input.")
+            elif ttype == "Withdrawal" and db_amt == 0:
+                st.error("Please enter a withdrawal amount.")
             else:
                 try:
-                    # Database Save
                     now = datetime.now()
                     with conn.session as s:
-                        # Ping check
-                        s.execute(text("SELECT 1"))
-                        # Insert transaction
+                        # Direct SQL execution for speed and reliability
                         s.execute(text("""
                             INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
                             VALUES (:n, :a, :d, :mc, :f)
-                        """), {"n": target, "a": db_amt, "d": now, "mc": db_marks, "f": db_fee})
+                        """), {
+                            "n": target, 
+                            "a": db_amt, 
+                            "d": now, 
+                            "mc": db_marks, 
+                            "f": db_fee
+                        })
                         s.commit()
                     
-                    # SUCCESS UI
                     st.success("✅ Transaction Saved to Cloud!")
                     st.balloons()
 
-                    # --- CALCULATE WHATSAPP DATA ---
+                    # --- WHATSAPP GENERATION ---
                     new_balance = total_saved_ghs + db_amt
                     formatted_phone = f"233{c_phone[-9:]}" 
                     receipt_msg = (
-                        f"✨ *RUCHANET DAILY SUSU* ✨%0A"
-                        f"👤 *Client:* {target}%0A"
-                        f"💵 *Amount:* GHS {abs(db_amt):,.2f}%0A"
-                        f"⭐ *NEW BALANCE:* GHS {new_balance:,.2f}%0A"
+                        f"✨ RUCHANET DAILY SUSU ✨%0A"
+                        f"👤 Client: {target}%0A"
+                        f"💵 Amount: GHS {abs(db_amt):,.2f} ({ttype})%0A"
+                        f"⭐ NEW BALANCE: GHS {new_balance:,.2f}%0A"
+                        f"📅 Date: {now.strftime('%Y-%m-%d %H:%M')}"
                     )
                     wa_link = f"https://wa.me/{formatted_phone}?text={receipt_msg}"
 
@@ -506,54 +524,73 @@ elif choice == "💸 Transactions":
                         </a>
                     """, unsafe_allow_html=True)
                     
+                    # Force a refresh to update metrics/history
                     time.sleep(2)
-                    if st.button("Refresh App"):
-                        st.rerun()
+                    st.rerun()
 
                 except Exception as e:
-                    st.error(f"📡 Connection Lost or Error: {e}")
-                    st.toast("Error saving to database", icon="❌")
+                    st.error(f"📡 Database Error: {e}")
     else:
-        st.error("Please register clients in Admin Tools first.")
+        st.warning("⚠️ No clients found. Please register a client in Admin Tools first.")
 
+elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if not clients.empty:
+        # Filter based on search input
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
         
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
             
-            # --- Business Logic ---
-            user_history = contributions[contributions['client_name'] == target].copy()
-            total_marks = user_history['marks_covered'].sum() if not user_history.empty else 0
-            current_balance = user_history['amount'].sum() if not user_history.empty else 0.0
+            # --- SAFETY FIX: Handle history even if contributions is empty ---
+            if not contributions.empty and 'client_name' in contributions.columns:
+                user_history = contributions[contributions['client_name'] == target].copy()
+                total_marks = user_history['marks_covered'].sum() if 'marks_covered' in user_history.columns else 0
+                current_balance = user_history['amount'].sum() if 'amount' in user_history.columns else 0.0
+            else:
+                user_history = pd.DataFrame()
+                total_marks = 0
+                current_balance = 0.0
             
-            # UI Display
+            # --- UI Display ---
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                if c_info.get('photo_url'):
+                # Check if photo exists, otherwise show a generic user icon
+                if c_info.get('photo_url') and str(c_info['photo_url']) != 'None':
                     st.image(c_info['photo_url'], use_container_width=True)
+                else:
+                    st.info("No photo available")
+            
             with col_b:
                 st.subheader(f"Account: {target}")
+                st.write(f"🆔 *ID:* {c_info.get('client_id', 'N/A')}")
+                st.write(f"📞 *Phone:* {c_info.get('phone', 'N/A')}")
+                
                 m1, m2 = st.columns(2)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Marks", f"{total_marks}")
 
             st.divider()
             
-            # --- THE FIX: NEW ACTION ROW ---
+            # --- ACTION ROW ---
             col_s1, col_s2 = st.columns(2)
             with col_s1:
-                # WhatsApp Button
+                # WhatsApp Share
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
-                wa_msg = f"📑 RUCHANET PASSBOOK%0AClient: {target}%0ABalance: GHS {current_balance:,.2f}"
-                st.markdown(f'<a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank"><button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">🟢 WhatsApp</button></a>', unsafe_allow_html=True)
+                wa_msg = f"📑 RUCHANET PASSBOOK%0A👤 Client: {target}%0A💰 Balance: GHS {current_balance:,.2f}%0A📅 Total Marks: {total_marks}"
+                st.markdown(f'''
+                    <a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">
+                        <button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
+                            🟢 Send via WhatsApp
+                        </button>
+                    </a>
+                ''', unsafe_allow_html=True)
             
             with col_s2:
-                # REPLACES PDF FUNCTION: Browser Print Button
+                # Print Function
                 st.markdown("""
                     <button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
                         🖨️ Print / Save PDF
@@ -561,13 +598,21 @@ elif choice == "💸 Transactions":
                 """, unsafe_allow_html=True)
 
             # History Table
+            st.write("### 📝 Transaction History")
             if not user_history.empty:
-                st.write("### 📝 History")
                 user_h_display = user_history.copy()
-                user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+                # Clean up date formatting for display
+                user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %I:%M %p')
+                
+                # Filter display columns safely
+                cols = [c for c in ['date', 'amount', 'marks_covered', 'fee'] if c in user_h_display.columns]
+                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[cols], use_container_width=True)
             else:
-                st.info("No transaction history yet.") # Added this to close the 'if not user_history.empty'
+                st.info("No transaction history recorded yet.")
+        else:
+            st.warning("🔍 No client matches your search.")
+    else:
+        st.error("Please register clients in Admin Tools first.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":

@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
+import sqlite3
 import time
 import re
 import math
@@ -9,9 +10,32 @@ from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
 from supabase import create_client
+from streamlit_gsheets import GSheetsConnection
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
+
+# --- UPDATED SYNC LOGIC ---
+def sync_data(new_record, df_context):
+    try:
+        # 1. SQL Sync
+        conn_sql = sqlite3.connect('susu_data.db')
+        new_record_df = pd.DataFrame([new_record])
+        new_record_df.to_sql('contributions', conn_sql, if_exists='append', index=False)
+        conn_sql.close()
+
+        # 2. Google Sheets Sync 
+        # Using the official .append_table method for st-gsheets-connection
+        gs_conn = st.connection("gsheets", type=GSheetsConnection)
+        gs_conn.create(data=new_record_df, worksheet="Contributions")
+
+        # 3. Update Local DataFrame
+        df_context = pd.concat([df_context, new_record_df], ignore_index=True)
+        
+        return df_context, True
+    except Exception as e:
+        st.error(f"Sync Error: {e}")
+        return df_context, False
 
 # --- PWA CONFIGURATION ---
 def pwa_support():
@@ -437,34 +461,53 @@ if choice == "📊 Dashboard":
 elif choice == "💸 Transactions":
         st.title("💸 Record Transactions")
         
-        # Check if we actually have clients to select from
         if not clients.empty:
             # 1. Select Client
             client_list = clients['client_name'].tolist()
             target = st.selectbox("Select Client", client_list)
             
-            # Get specific data for the selected client
             client_row = clients[clients['client_name'] == target].iloc[0]
             d_mark = float(client_row['daily_mark'])
-            c_phone = str(client_row['phone']) 
             
-            # --- SAFETY FIX: Handle history even if contributions is empty ---
+            # --- DATA RETRIEVAL ---
             if not contributions.empty and 'client_name' in contributions.columns:
                 user_history = contributions[contributions['client_name'] == target]
-                total_saved_ghs = float(user_history['amount'].sum()) if 'amount' in user_history.columns else 0.0
-                total_marks_saved = int(user_history['marks_covered'].sum()) if 'marks_covered' in user_history.columns else 0
+                total_saved_ghs = float(user_history['amount'].sum())
+                total_marks_saved = int(user_history['marks_covered'].sum())
             else:
                 user_history = pd.DataFrame()
                 total_saved_ghs = 0.0
                 total_marks_saved = 0
             
-            # --- PROGRESS TRACKER (FIXED) ---
-            current_cycle_marks = total_marks_saved % 31
-            # Ensure the value is a float between 0.0 and 1.0
-            progress_percent = float(max(0, min(current_cycle_marks / 31, 1.0)))
+            # --- PROGRESS TRACKER (FIXED & SAFE) ---
+            try:
+                # Modulo 31 to find marks in the current cycle
+                current_cycle_marks = float(total_marks_saved % 31)
+                progress_val = current_cycle_marks / 31.0
+                
+                # Clamping ensures the value is ALWAYS between 0.0 and 1.0
+                # This prevents the StreamlitAPIException crash
+                safe_progress = float(max(0.0, min(progress_val, 1.0)))
+                
+            except (ZeroDivisionError, TypeError, ValueError):
+                # Only runs if there's a math issue or data is None
+                current_cycle_marks = 0.0
+                safe_progress = 0.0
             
-            st.write(f"📊 *Current Month Progress:* {int(current_cycle_marks)}/31 Marks")
-            st.progress(progress_percent)
+            st.write(f"📊 Current Month Progress: *{int(current_cycle_marks)}/31* Marks")
+            st.progress(safe_progress)
+
+            # --- RECENT HISTORY FOR THIS CLIENT ---
+            with st.expander("🕒 View Client's Recent Transactions", expanded=False):
+                if not user_history.empty:
+                    # Show only last 5 for this specific client
+                    hist_disp = user_history.sort_values('date', ascending=False).head(5).copy()
+                    hist_disp['date'] = pd.to_datetime(hist_disp['date']).dt.strftime('%Y-%m-%d %H:%M')
+                    st.dataframe(hist_disp[['date', 'amount', 'marks_covered']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No history found for this client.")
+
+            st.divider()
 
             # 2. Transaction Inputs
             ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
@@ -477,21 +520,46 @@ elif choice == "💸 Transactions":
                 db_marks = num_marks
                 st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
             
-            else: # Withdrawal logic
+            else: # Withdrawal
                 requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
-                # Service Fee is usually 1 day's mark per month saved
+                # Fee calculation (1 day mark per month/cycle)
                 months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
                 db_fee = float(months_count * d_mark)
                 
                 total_deduction = requested_cash + db_fee
-                db_amt = -requested_cash # Negative for withdrawal
+                db_amt = -requested_cash 
                 
                 if requested_cash > 0:
                     if total_deduction > total_saved_ghs:
-                        st.error(f"⚠️ Insufficient Balance! (Total needed: GHS {total_deduction:,.2f})")
+                        st.error(f"⚠️ Insufficient Balance! (Needed: GHS {total_deduction:,.2f})")
                         can_save = False
                     else:
-                        st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee")
+                        st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Fee")
+
+            # --- 3. THE SYNC BUTTON ---
+            if st.button("🚀 Confirm & Sync Transaction"):
+                if can_save and db_amt != 0:
+                    new_entry = {
+                        'amount': db_amt,
+                        'client_name': target,
+                        'date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'fee': db_fee,
+                        'id': len(contributions) + 1,
+                        'marks_covered': db_marks,
+                        'client_id': client_row['client_id']
+                    }
+
+                    # Call the helper function
+                    contributions, success = sync_data(new_entry, contributions)
+
+                    if success:
+                        st.cache_data.clear() # THIS IS THE KEY: Forces fetch_data to see the withdrawal
+                        st.success(f"✅ Withdrawal of GHS {abs(db_amt)} recorded!")
+                        st.rerun()
+                else:
+                    st.error("Invalid amount or check balance.")
+        else:
+            st.warning("Please register clients first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")

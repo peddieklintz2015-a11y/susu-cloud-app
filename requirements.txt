@@ -1,6 +1,7 @@
 streamlit
 sqlalchemy
 pandas
+st-gsheets-connection
 psycopg2-binary
 supabase
 xlsxwriter

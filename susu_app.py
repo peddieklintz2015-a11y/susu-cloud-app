@@ -37,10 +37,23 @@ re_tool = re.compile(r'.*')
 def set_custom_style():
     st.markdown("""
     <style>
+    /* 1. Your existing colors */
     div.stButton > button:first-child { background-color: #FFD700 !important; color: #212529 !important; font-weight: bold !important; border: none !important; }
     [data-testid="stMetricValue"] { color: #FF4500 !important; font-size: 30px !important; }
     [data-testid="stSidebar"] { background-color: #212529 !important; color: #F8F9FA; }
+    
+    /* 2. Hide Streamlit branding to look like a real app */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    
+    /* 3. Make it more mobile-friendly */
+    [data-testid="stAppViewContainer"] { padding-top: 1rem; }
     </style>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#212529">
     """, unsafe_allow_html=True)
 
 # Run UI Enhancements
@@ -422,116 +435,63 @@ if choice == "📊 Dashboard":
         st.warning("🚨 No transaction records found in the system.")
 
 elif choice == "💸 Transactions":
-    st.title("💸 Record Transactions")
-    
-    # Check if we actually have clients to select from
-    if not clients.empty:
-        # 1. Select Client
-        client_list = clients['client_name'].tolist()
-        target = st.selectbox("Select Client", client_list)
+        st.title("💸 Record Transactions")
         
-        # Get specific data for the selected client
-        client_row = clients[clients['client_name'] == target].iloc[0]
-        d_mark = float(client_row['daily_mark'])
-        c_phone = str(client_row['phone']) 
-        
-        # --- SAFETY FIX: Handle history even if contributions is empty ---
-        if not contributions.empty and 'client_name' in contributions.columns:
-            user_history = contributions[contributions['client_name'] == target]
-            total_saved_ghs = user_history['amount'].sum() if 'amount' in user_history.columns else 0.0
-            total_marks_saved = user_history['marks_covered'].sum() if 'marks_covered' in user_history.columns else 0
-        else:
-            # Default values for a brand new system with no records
-            user_history = pd.DataFrame()
-            total_saved_ghs = 0.0
-            total_marks_saved = 0
-        
-        # --- PROGRESS TRACKER ---
-        current_cycle_marks = total_marks_saved % 31
-        progress_percent = min(current_cycle_marks / 31, 1.0)
-        st.write(f"📊 *Current Month Progress:* {int(current_cycle_marks)}/31 Marks")
-        st.progress(progress_percent)
-
-        # 2. Transaction Inputs
-        ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
-        can_save = True
-        db_amt, db_marks, db_fee = 0.0, 0, 0.0
-
-        if ttype == "Deposit":
-            num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
-            db_amt = float(num_marks * d_mark)
-            db_marks = num_marks
-            st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
-        else:
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
-            # Service Fee is usually 1 day's mark per month saved
-            months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
-            db_fee = months_count * d_mark
+        # Check if we actually have clients to select from
+        if not clients.empty:
+            # 1. Select Client
+            client_list = clients['client_name'].tolist()
+            target = st.selectbox("Select Client", client_list)
             
-            total_deduction = requested_cash + db_fee
-            db_amt = -requested_cash # Negative for withdrawal
+            # Get specific data for the selected client
+            client_row = clients[clients['client_name'] == target].iloc[0]
+            d_mark = float(client_row['daily_mark'])
+            c_phone = str(client_row['phone']) 
             
-            if requested_cash > 0:
-                if total_deduction > total_saved_ghs:
-                    st.error(f"⚠️ Insufficient Balance! (Total needed: GHS {total_deduction:,.2f})")
-                    can_save = False
-                else:
-                    st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee")
-
-        # 3. Save Execution
-        if st.button("Confirm & Save Transaction"):
-            if not can_save:
-                st.error("Cannot save. Check balance or input.")
-            elif ttype == "Withdrawal" and db_amt == 0:
-                st.error("Please enter a withdrawal amount.")
+            # --- SAFETY FIX: Handle history even if contributions is empty ---
+            if not contributions.empty and 'client_name' in contributions.columns:
+                user_history = contributions[contributions['client_name'] == target]
+                total_saved_ghs = float(user_history['amount'].sum()) if 'amount' in user_history.columns else 0.0
+                total_marks_saved = int(user_history['marks_covered'].sum()) if 'marks_covered' in user_history.columns else 0
             else:
-                try:
-                    now = datetime.now()
-                    with conn.session as s:
-                        # Direct SQL execution for speed and reliability
-                        s.execute(text("""
-                            INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
-                            VALUES (:n, :a, :d, :mc, :f)
-                        """), {
-                            "n": target, 
-                            "a": db_amt, 
-                            "d": now, 
-                            "mc": db_marks, 
-                            "f": db_fee
-                        })
-                        s.commit()
-                    
-                    st.success("✅ Transaction Saved to Cloud!")
-                    st.balloons()
+                user_history = pd.DataFrame()
+                total_saved_ghs = 0.0
+                total_marks_saved = 0
+            
+            # --- PROGRESS TRACKER (FIXED) ---
+            current_cycle_marks = total_marks_saved % 31
+            # Ensure the value is a float between 0.0 and 1.0
+            progress_percent = float(max(0, min(current_cycle_marks / 31, 1.0)))
+            
+            st.write(f"📊 *Current Month Progress:* {int(current_cycle_marks)}/31 Marks")
+            st.progress(progress_percent)
 
-                    # --- WHATSAPP GENERATION ---
-                    new_balance = total_saved_ghs + db_amt
-                    formatted_phone = f"233{c_phone[-9:]}" 
-                    receipt_msg = (
-                        f"✨ RUCHANET DAILY SUSU ✨%0A"
-                        f"👤 Client: {target}%0A"
-                        f"💵 Amount: GHS {abs(db_amt):,.2f} ({ttype})%0A"
-                        f"⭐ NEW BALANCE: GHS {new_balance:,.2f}%0A"
-                        f"📅 Date: {now.strftime('%Y-%m-%d %H:%M')}"
-                    )
-                    wa_link = f"https://wa.me/{formatted_phone}?text={receipt_msg}"
+            # 2. Transaction Inputs
+            ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
+            can_save = True
+            db_amt, db_marks, db_fee = 0.0, 0, 0.0
 
-                    st.markdown(f"""
-                        <a href="{wa_link}" target="_blank">
-                            <button style="background-color: #25D366; color: white; padding: 15px; border: none; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer;">
-                                🟢 Send WhatsApp Receipt
-                            </button>
-                        </a>
-                    """, unsafe_allow_html=True)
-                    
-                    # Force a refresh to update metrics/history
-                    time.sleep(2)
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"📡 Database Error: {e}")
-    else:
-        st.warning("⚠️ No clients found. Please register a client in Admin Tools first.")
+            if ttype == "Deposit":
+                num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
+                db_amt = float(num_marks * d_mark)
+                db_marks = num_marks
+                st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
+            
+            else: # Withdrawal logic
+                requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
+                # Service Fee is usually 1 day's mark per month saved
+                months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
+                db_fee = float(months_count * d_mark)
+                
+                total_deduction = requested_cash + db_fee
+                db_amt = -requested_cash # Negative for withdrawal
+                
+                if requested_cash > 0:
+                    if total_deduction > total_saved_ghs:
+                        st.error(f"⚠️ Insufficient Balance! (Total needed: GHS {total_deduction:,.2f})")
+                        can_save = False
+                    else:
+                        st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee")
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")

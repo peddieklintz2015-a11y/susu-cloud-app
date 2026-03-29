@@ -1,28 +1,38 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import time
 import re
 import math
 import smtplib
-import sqlite3
 from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
 from supabase import create_client
 
-# This line enures 're' is seen as used without causing a syntax warning
-re_tool = re.compile(r'.*')
-
-# --- 0. MAINTENANCE MODE (SECRET CONTROL) ---
-# This stops the app immediately if the secret is set to true
-if st.secrets["app_settings"]["maintenance_mode"]:
-    st.title("🚧 System Maintenance")
-    st.warning("RUCHANET DAILY SUSU is currently undergoing scheduled updates.")
-    st.info("We'll be back online shortly! 🙏")
-    st.stop()
-
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
+
+# --- PWA CONFIGURATION ---
+def pwa_support():
+    # Everything must be indented inside the function
+    components.html("""
+        <script>
+            if ('serviceWorker' in navigator) {
+              window.addEventListener('load', function() {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                  console.log('PWA Registered');
+                });
+              });
+            }
+        </script>
+    """, height=0)
+
+# CRITICAL: You must call the function for it to run!
+pwa_support()
+
+# This line enures 're' is seen as used without causing a syntax warning
+re_tool = re.compile(r'.*')
 
 def set_custom_style():
     st.markdown("""
@@ -33,42 +43,64 @@ def set_custom_style():
     </style>
     """, unsafe_allow_html=True)
 
+# Run UI Enhancements
 set_custom_style()
 
-# --- 2. DATABASE & CLOUD SETUP ---
+# --- 0. MAINTENANCE MODE (SECRET CONTROL) ---
+# This stops the app immediately if the secret is set to true
+if st.secrets["app_settings"]["maintenance_mode"]:
+    st.title("🚧 System Maintenance")
+    st.warning("RUCHANET DAILY SUSU is currently undergoing scheduled updates.")
+    st.info("We'll be back online shortly! 🙏")
+    st.stop()
+
 conn = st.connection("postgresql", type="sql")
 
-# Initialize Supabase once at the start
 try:
-    sb_client = create_client(
-        st.secrets["supabase_url"], 
-        st.secrets["supabase_key"]
-    )
+    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 except Exception as e:
-    st.error(f"Critical Error: Supabase configuration missing! {e}")
+    st.error(f"Supabase Error: {e}")
     st.stop()
+
+# --- 6. NAVIGATION & INSTALL GUIDE ---
+with st.sidebar:
+    st.title("📱 App Options")
+    
+    # Combined Install Guide
+    if st.checkbox("Show Install Guide"):
+        st.info("""
+        *To Install on Phone:*
+        * *Android:* Tap ⋮ and 'Install App'.
+        * *iOS:* Tap Share 📤 and 'Add to Home Screen'.
+        """)
+    
+    st.divider()
+
+menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+choice = st.sidebar.selectbox("Go To:", menu)
+# --- 1. SETUP ---
+st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
+
+set_custom_style()
 
 # --- 3. DATA FUNCTIONS ---
 @st.cache_data(ttl=60)
 def fetch_data():
     try:
         with conn.session as s:
-            # Fetching as dictionaries often helps Pandas handle SQL types better
-            clients_df = pd.DataFrame(s.execute(text("SELECT * FROM clients")).mappings().all())
+            # We select your custom client_id AND the daily_mark
+            clients_df = pd.DataFrame(s.execute(
+                text("SELECT client_id, name AS client_name, phone, daily_mark, photo_url FROM clients")
+            ).mappings().all())
+            
+            # For contributions, ensure it has a client_name column to link back
             contributions_df = pd.DataFrame(s.execute(
                 text("SELECT id, client_name, amount, date, marks_covered, fee FROM contributions")
             ).mappings().all())
             
-            if not contributions_df.empty:
-                # FIX: Use format='ISO8601' or let pandas infer to handle the timestamps seen in your error
-                contributions_df['date'] = pd.to_datetime(contributions_df['date'], errors='coerce')
-                contributions_df['amount'] = pd.to_numeric(contributions_df['amount'], errors='coerce').fillna(0)
-                contributions_df['fee'] = pd.to_numeric(contributions_df['fee'], errors='coerce').fillna(0)
-                contributions_df['marks_covered'] = pd.to_numeric(contributions_df['marks_covered'], errors='coerce').fillna(0)
-            
             return clients_df, contributions_df
     except Exception as e:
-        st.error(f"Failed to fetch data: {e}")
+        st.error(f"Mapping Error: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 def send_weekly_report(contributions_df, manual=False):
@@ -211,22 +243,33 @@ if not check_password():
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()
-if clients.empty:
-    # If no clients exist, we can't merge IDs or Names
-    st.info("💡 No clients found. Register a client to see reports.")
-    combined_df = contributions  # Keep it as is so the app doesn't crash
+
+# Initialize combined_df as empty or just contributions to start
+combined_df = pd.DataFrame()
+
+if not clients.empty:
+    if not contributions.empty:
+        # Check if 'client_name' exists in both dataframes
+        if 'client_name' in clients.columns and 'client_name' in contributions.columns:
+            try:
+                combined_df = pd.merge(
+                    contributions, 
+                    clients[['client_id', 'client_name']], 
+                    on='client_name', 
+                    how='left'
+                )
+            except Exception as e:
+                st.error(f"Merge Error: {e}")
+                combined_df = contributions
+        else:
+            st.warning("⚠️ Database Mismatch: Ensure 'client_name' exists in both tables.")
+            combined_df = contributions
+    else:
+        # If no contributions yet, combined_df is just empty
+        combined_df = pd.DataFrame()
 else:
-    # Only run this if 'clients' actually contains the columns 'client_id' and 'client_name'
-    try:
-        combined_df = pd.merge(
-            contributions, 
-            clients[['client_id', 'client_name']], 
-            on='client_name', 
-            how='left'
-        )
-    except KeyError as e:
-        st.error(f"Missing column in Database: {e}")
-        combined_df = contributions
+    # If no clients yet, we can't merge anything
+    combined_df = contributions
 
 # --- DISPLAY DATA ---
 if not combined_df.empty:
@@ -276,19 +319,53 @@ if now.weekday() == 6 and now.hour >= 8:
 
 # --- 6. NAVIGATION ---
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+with st.sidebar:
+    st.title("📱 App Options")
+    
+    # --- NETWORK & SCHEMA HEALTH CHECK ---
+    try:
+        # Check if we can connect to the database
+        conn.session.execute(text("SELECT 1"))
+        db_status = "🟢 Online"
+    except Exception:
+        db_status = "🔴 Offline"
+
+    # Check for the 'client_name' column to prevent the red error box
+    schema_status = "✅ Sync OK"
+    if 'clients' in locals() and not clients.empty:
+        if 'client_name' not in clients.columns:
+            schema_status = "⚠️ Schema Error"
+    
+    # Display Status as a clean "Status Bar" in the sidebar
+    st.markdown(f"""
+    <div style="background-color: #343a40; padding: 10px; border-radius: 5px; border-left: 5px solid #FFD700;">
+        <p style="margin:0; font-size: 12px; color: #adb5bd;">SYSTEM STATUS</p>
+        <p style="margin:0; font-weight: bold;">Cloud: {db_status} | {schema_status}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.divider()
+
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
     # 1. Header & Refresh Control
-    head_col, btn_col = st.columns([5, 1])
+    head_col, btn_col = st.columns([4, 2])
     with head_col:
-        st.title("📊 Financial Overview")
+     st.title("📊 Financial Overview")
+
     with btn_col:
-        st.markdown("<br>", unsafe_allow_html=True)
-        # UPDATED: Added cache clearing to the refresh button
-        if st.button("🔄 Refresh"):
-            st.cache_data.clear()
-            st.rerun()
+     st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 Sync & Refresh"):
+        # 1. Clear the Streamlit Cache
+        st.cache_data.clear()
+        
+        # 2. Show a native-style mobile notification
+        st.toast("Syncing with Cloud Database...", icon="☁️")
+        
+        # 3. Small delay for visual feedback, then rerun
+        time.sleep(0.5)
+        st.rerun()
     
     # 2. Latest Member Alert - UPDATED with safety check
     if 'clients' in locals() and not clients.empty:
@@ -346,6 +423,7 @@ if choice == "📊 Dashboard":
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
+    
     if not clients.empty:
         # 1. Select Client and Get Data
         target = st.selectbox("Select Client", clients['client_name'].tolist())
@@ -357,13 +435,11 @@ elif choice == "💸 Transactions":
         total_saved_ghs = user_history['amount'].sum()
         total_marks_saved = user_history['marks_covered'].sum() 
         
-        # --- NEW: PROGRESS TRACKER ---
-        # Calculate current cycle progress (0 to 31)
+        # --- PROGRESS TRACKER ---
         current_cycle_marks = total_marks_saved % 31
         progress_percent = min(current_cycle_marks / 31, 1.0)
-        st.write(f"📊 **Current Month Progress:** {current_cycle_marks}/31 Marks")
+        st.write(f"📊 **Current Month Progress:** {int(current_cycle_marks)}/31 Marks")
         st.progress(progress_percent)
-        # -----------------------------
 
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
         can_save = True
@@ -375,14 +451,9 @@ elif choice == "💸 Transactions":
             db_marks = num_marks
             st.info(f"Value: GHS {db_amt:,.2f} | Marks to be added: {num_marks}")
         else:
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0,)
-            
-            # --- NEW: MATH.CEIL FEE CALCULATION ---
-            # Charge 1 mark for every month (or part of a month) they have saved
-            # e.g., 32 marks = 2 months = 2 * daily_mark fee
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
             months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
             db_fee = months_count * d_mark
-            # --------------------------------------
             
             total_deduction = requested_cash + db_fee
             db_amt = -requested_cash 
@@ -392,80 +463,58 @@ elif choice == "💸 Transactions":
                     st.error(f"⚠️ Insufficient Balance! (Total needed: GHS {total_deduction:,.2f})")
                     can_save = False
                 else:
-                    st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee ({months_count} months)")
+                    st.warning(f"Deducting GHS {requested_cash:,.2f} + GHS {db_fee:,.2f} Service Fee")
 
         # 2. Confirm and Save Logic
-        if st.button("Confirm & Save") and can_save:
-            try:
-                now = datetime.now()
-                with conn.session as s:
-                    s.execute(text("""
-                        INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
-                        VALUES (:n, :a, :d, :mc, :f)
-                    """), {"n": target, "a": db_amt, "d": now, "mc": db_marks, "f": db_fee})
-                    s.commit()
+        if st.button("Confirm & Save"):
+            if not can_save:
+                st.error("Cannot save. Check balance or input.")
+            else:
+                try:
+                    # Database Save
+                    now = datetime.now()
+                    with conn.session as s:
+                        # Ping check
+                        s.execute(text("SELECT 1"))
+                        # Insert transaction
+                        s.execute(text("""
+                            INSERT INTO contributions (client_name, amount, date, marks_covered, fee) 
+                            VALUES (:n, :a, :d, :mc, :f)
+                        """), {"n": target, "a": db_amt, "d": now, "mc": db_marks, "f": db_fee})
+                        s.commit()
+                    
+                    # SUCCESS UI
+                    st.success("✅ Transaction Saved to Cloud!")
+                    st.balloons()
 
-                # --- CALCULATE WHATSAPP DATA ---
-                new_balance = total_saved_ghs + db_amt
-                formatted_phone = f"233{c_phone[-9:]}" 
-                
-                receipt_msg = (
-                    f"✨ *RUCHANET DAILY SUSU* ✨%0A"
-                    f"---------------------------%0A"
-                    f"👤 *Client:* {target}%0A"
-                    f"📝 *Type:* {ttype}%0A"
-                    f"💵 *Amount:* GHS {abs(db_amt):,.2f}%0A"
-                    f"🕒 *Time:* {now.strftime('%I:%M %p')}%0A"
-                    f"---------------------------%0A"
-                    f"⭐ *NEW BALANCE:* GHS {new_balance:,.2f}%0A"
-                    f"---------------------------%0A"
-                    f"Thank you for saving! 🙏"
-                )
-                wa_link = f"https://wa.me/{formatted_phone}?text={receipt_msg}"
+                    # --- CALCULATE WHATSAPP DATA ---
+                    new_balance = total_saved_ghs + db_amt
+                    formatted_phone = f"233{c_phone[-9:]}" 
+                    receipt_msg = (
+                        f"✨ *RUCHANET DAILY SUSU* ✨%0A"
+                        f"👤 *Client:* {target}%0A"
+                        f"💵 *Amount:* GHS {abs(db_amt):,.2f}%0A"
+                        f"⭐ *NEW BALANCE:* GHS {new_balance:,.2f}%0A"
+                    )
+                    wa_link = f"https://wa.me/{formatted_phone}?text={receipt_msg}"
 
-                # 3. SUCCESS UI
-                st.toast(f"✅ {ttype} Recorded! New Balance: GHS {new_balance:,.2f}", icon="💰")
-                st.balloons()
+                    st.markdown(f"""
+                        <a href="{wa_link}" target="_blank">
+                            <button style="background-color: #25D366; color: white; padding: 15px; border: none; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer;">
+                                🟢 Send WhatsApp Receipt
+                            </button>
+                        </a>
+                    """, unsafe_allow_html=True)
+                    
+                    time.sleep(2)
+                    if st.button("Refresh App"):
+                        st.rerun()
 
-                # SHOW WHATSAPP BUTTON
-                st.markdown(f"""
-                    <a href="{wa_link}" target="_blank">
-                        <button style="background-color: #25D366; color: white; padding: 15px; border: none; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px;">
-                            🟢 Send WhatsApp Receipt
-                        </button>
-                    </a>
-                """, unsafe_allow_html=True)
-                
-                time.sleep(2)
-                if st.button("Refresh App"):
-                    st.rerun()
-
-            except Exception as e:
-                st.error(f"🚨 Transaction Failed: {e}")
-                st.toast("Error saving to database", icon="❌")
+                except Exception as e:
+                    st.error(f"📡 Connection Lost or Error: {e}")
+                    st.toast("Error saving to database", icon="❌")
     else:
         st.error("Please register clients in Admin Tools first.")
-
-elif choice == "📑 Digital Passbook":
-    # 1. Setup the Print Header (Hidden on web, visible on print)
-    current_date = datetime.now().strftime("%d %B, %Y")
-    logo_url = "https://raw.githubusercontent.com/peddieklintz2015-a11y/susu-cloud-app/main/logo.jpeg"
-    
-    st.markdown(f"""
-        <style>
-        .print-header {{ display: none; }}
-        @media print {{
-            .print-header {{ display: flex !important; flex-direction: column; align-items: center; text-align: center; margin-bottom: 20px; }}
-            .print-header img {{ width: 100px; }}
-            section[data-testid="stSidebar"], .stActionButton, header {{ display: none !important; }}
-        }}
-        </style>
-        <div class="print-header">
-            <img src="{logo_url}">
-            <h1>RUCHANET DAILY SUSU</h1>
-            <p>Generated on: {current_date}</p>
-        </div>
-    """, unsafe_allow_html=True)
 
     st.title("📑 Client Passbook")
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")

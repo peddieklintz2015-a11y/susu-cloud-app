@@ -77,7 +77,7 @@ with st.sidebar:
     st.divider()
 
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
-choice = st.sidebar.selectbox("Go To:", menu)
+
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
@@ -90,7 +90,7 @@ def fetch_data():
         with conn.session as s:
             # We select your custom client_id AND the daily_mark
             clients_df = pd.DataFrame(s.execute(
-                text("SELECT client_id, name AS client_name, phone, daily_mark, photo_url FROM clients")
+                text("SELECT client_id, client_name, phone, daily_mark, photo_url FROM clients")
             ).mappings().all())
             
             # For contributions, ensure it has a client_name column to link back

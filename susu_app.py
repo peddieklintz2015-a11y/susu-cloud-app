@@ -233,30 +233,34 @@ if not combined_df.empty:
 else:
     st.write("No data to display yet.")
 
-    # --- 5.5 SHRUNK LIVE SYSTEM OVERVIEW ---
-st.markdown("""
-    <style>
-    /* This shrinks the font size of the metrics at the top */
-    [data-testid="stMetricValue"] {
-        font-size: 18px !important;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 14px !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    # --- 5.5 COMPACT SYSTEM STATUS BAR ---
+with st.container():
+    # 1. Prepare Data Safely
+    c_num = len(clients) if 'clients' in locals() and not clients.empty else 0
+    t_num = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
+    
+    if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns:
+        v_sum = contributions['amount'].sum()
+    else:
+        v_sum = 0.0
 
-s_col1, s_col2, s_col3 = st.columns(3)
+    # 2. Horizontal Layout (4 columns)
+    # [3, 1, 1, 2] means the Title and Vault get more space than the simple counts
+    st_c1, st_c2, st_c3, st_c4 = st.columns([3, 1, 1, 2])
 
-with s_col1:
-    st.metric("Clients", len(clients) if not clients.empty else 0)
-with s_col2:
-    st.metric("Transactions", len(contributions) if not contributions.empty else 0)
-with s_col3:
-    v_amt = contributions['amount'].sum() if not contributions.empty else 0.0
-    st.metric("Vault", f"GHS {v_amt:,.2f}")
+    with st_c1:
+        st.markdown("#### ⚡ Live System Monitor")
+    
+    with st_c2:
+        st.markdown(f"👥 **Clients** \n`{c_num}`")
+    
+    with st_c3:
+        st.markdown(f"📝 **Trans.** \n`{t_num}`")
+    
+    with st_c4:
+        st.markdown(f"💰 **Total Vault** \n`GHS {v_sum:,.2f}`")
 
-st.divider()
+    st.divider()
 
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()

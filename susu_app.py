@@ -233,28 +233,22 @@ if not combined_df.empty:
 else:
     st.write("No data to display yet.")
 
-    # --- 5.5 LIVE SYSTEM OVERVIEW (STAY AT TOP) ---
-with st.container():
-    st.markdown("### 📊 Live System Overview")
-    # Using 'gap="medium"' helps space them out better
-    s_col1, s_col2, s_col3 = st.columns(3, gap="medium")
-
-    with s_col1:
-        c_count = len(clients) if 'clients' in locals() and not clients.empty else 0
-        st.metric("Total Clients", f"{c_count}")
-
-    with s_col2:
-        t_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
-        st.metric("Transactions", f"{t_count}")
-
-    with s_col3:
-        if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns:
-            v_total = contributions['amount'].sum()
-            st.metric("Total Vault", f"GHS {v_total:,.2f}")
-        else:
-            st.metric("Total Vault", "GHS 0.00")
+    # --- 5.5 COMPACT LIVE SYSTEM OVERVIEW ---
+with st.expander("📊 View System Quick Stats", expanded=True):
+    # Use 3 columns for a single row layout
+    c1, c2, c3 = st.columns(3)
     
-    st.divider()
+    # Calculate values safely
+    cl_count = len(clients) if 'clients' in locals() and not clients.empty else 0
+    tr_count = len(contributions) if 'contributions' in locals() and not contributions.empty else 0
+    vt_total = contributions['amount'].sum() if 'contributions' in locals() and not contributions.empty and 'amount' in contributions.columns else 0.0
+
+    # Displaying them as smaller text instead of big Metrics
+    c1.write(f"👥 **Clients:** {cl_count}")
+    c2.write(f"📝 **Transactions:** {tr_count}")
+    c3.write(f"💰 **Vault:** GHS {vt_total:,.2f}")
+
+st.divider()
 
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()

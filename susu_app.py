@@ -16,25 +16,24 @@ st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
 # --- UPDATED SYNC LOGIC ---
 def sync_data_dual(new_record):
-    """Writes to Local SQLite and Cloud PostgreSQL simultaneously."""
+    """Writes to Local SQLite and Cloud PostgreSQL simultaneously with standardized dates."""
     success_local = False
     success_cloud = False
     
     # 1. LOCAL STORAGE (SQLite)
     try:
         conn_local = sqlite3.connect('susu_data.db')
-        # Create table if it doesn't exist (First run safety)
         conn_local.execute("""
             CREATE TABLE IF NOT EXISTS contributions 
             (client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
         """)
         
-        new_record_df = pd.DataFrame([new_record])
-        # We drop the 'id' if it exists to let SQLite/Postgres auto-increment
-        if 'id' in new_record_df.columns:
-            new_record_df = new_record_df.drop(columns=['id'])
+        # Standardize record for SQLite
+        local_df = pd.DataFrame([new_record])
+        if 'id' in local_df.columns:
+            local_df = local_df.drop(columns=['id'])
             
-        new_record_df.to_sql('contributions', conn_local, if_exists='append', index=False)
+        local_df.to_sql('contributions', conn_local, if_exists='append', index=False)
         conn_local.close()
         success_local = True
     except Exception as e:
@@ -49,7 +48,7 @@ def sync_data_dual(new_record):
             """), {
                 "cn": new_record['client_name'],
                 "am": float(new_record['amount']),
-                "dt": new_record['date'],
+                "dt": new_record['date'], # Already ISO string from the button logic
                 "mk": int(new_record['marks_covered']),
                 "fe": float(new_record['fee'])
             })
@@ -120,12 +119,12 @@ if st.secrets["app_settings"]["maintenance_mode"]:
     st.info("We'll be back online shortly! 🙏")
     st.stop()
 
+# --- 4. DATABASE CONNECTIONS ---
 conn = st.connection("postgresql", type="sql")
-
 try:
     sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 except Exception as e:
-    st.error(f"Supabase Error: {e}")
+    st.error(f"Supabase Error: {e}") 
     st.stop()
 
 # --- 6. NAVIGATION & INSTALL GUIDE ---
@@ -143,9 +142,6 @@ with st.sidebar:
     st.divider()
 
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
-
-# --- 1. SETUP ---
-st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
 set_custom_style()
 
@@ -415,68 +411,76 @@ with st.sidebar:
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    # 1. Header & Refresh Control
+    # 1. Header & Quick Refresh
     head_col, btn_col = st.columns([4, 2])
     with head_col:
         st.title("📊 Financial Overview")
-
     with btn_col:
-        st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Sync & Refresh"):
-            # Clear the Streamlit Cache to pull fresh data
             st.cache_data.clear()
-            # Show a native-style mobile notification
-            st.toast("Syncing with Cloud Database...", icon="☁️")
-            time.sleep(0.5)
             st.rerun()
-    
-    # 2. Latest Member Alert
-    if 'clients' in locals() and not clients.empty:
-        last_row = clients.tail(1).iloc[0]
-        st.success(f"🆕 *Latest Member Registered:* {last_row['client_name']} (ID: {last_row.get('client_id', 'N/A')})")
-        total_client_count = len(clients)
-    else:
-        st.info("💡 Tip: Go to Admin Tools to register your first client!")
-        total_client_count = 0
 
-    # 3. Key Metrics
+    # 2. Key Metrics Logic
     m1, m2, m3, m4 = st.columns(4)
+    total_client_count = len(clients) if not clients.empty else 0
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
-    if 'contributions' in locals() and not contributions.empty:
-        total_vault = contributions['amount'].sum()
-        total_commissions = contributions['fee'].sum()
+    if not contributions.empty:
+        # Create a copy for date processing to avoid SettingWithCopy warnings
+        df_display = contributions.copy()
+        df_display['date_dt'] = pd.to_datetime(df_display['date'], errors='coerce', utc=True)
+        df_display = df_display.dropna(subset=['date_dt'])
+        
+        # Calculate Totals
+        total_vault = df_display['amount'].sum()
+        total_commissions = df_display['fee'].sum()
         net_liability = total_vault - total_commissions 
         
-        m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}")
-        m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
-        m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}")
-
-        # 4. Monthly Profit Chart
-        st.subheader("📈 Monthly Commission Growth")
-        chart_df = contributions.copy()
-        chart_df['date'] = pd.to_datetime(chart_df['date'])
-        chart_df['Month'] = chart_df['date'].dt.strftime('%b %Y')
-        monthly_profit = chart_df.groupby('Month')['fee'].sum().reset_index()
-        st.bar_chart(data=monthly_profit, x='Month', y='fee')
-
-        # 5. Today's Transaction Log
-        st.subheader("🕒 Today's Activity")
+        # --- DAILY DIFFERENCE LOGIC ---
         today_date = datetime.now().date()
-        today_logs = chart_df[chart_df['date'].dt.date == today_date].copy()
+        yesterday_date = today_date - pd.Timedelta(days=1)
         
-        if not today_logs.empty:
-            today_logs['Time'] = today_logs['date'].dt.strftime('%I:%M %p')
-            cols_to_show = [c for c in ['Time', 'client_name', 'amount', 'marks_covered'] if c in today_logs.columns]
-            display_logs = today_logs[cols_to_show].sort_values(by='Time', ascending=False)
-            st.table(display_logs)
-        else:
-            st.info("No transactions recorded yet today.")
+        today_total = df_display[df_display['date_dt'].dt.date == today_date]['amount'].sum()
+        yesterday_total = df_display[df_display['date_dt'].dt.date == yesterday_date]['amount'].sum()
+        daily_diff = today_total - yesterday_total
+
+        # Display Metrics
+        m2.metric(
+            label="💰 Total Vault", 
+            value=f"GHS {total_vault:,.2f}",
+            delta=f"GHS {today_total:,.2f} Today"
+        )
+        m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
+        m4.metric(
+            label="📉 Net Liability", 
+            value=f"GHS {net_liability:,.2f}",
+            delta=f"Diff: GHS {daily_diff:,.2f}",
+            delta_color="inverse" 
+        )
+
+        # --- 3. MONTHLY PROFIT CHART ---
+        st.write("---") # Visual separator
+        st.subheader("📈 Monthly Commission Growth")
+        
+        # Grouping by month
+        df_display['Month'] = df_display['date_dt'].dt.strftime('%b %Y')
+        monthly_profit = df_display.groupby('Month')['fee'].sum().reset_index()
+        
+        # Sorting by date to ensure the chart flows correctly
+        monthly_profit['sort_date'] = pd.to_datetime(monthly_profit['Month'])
+        monthly_profit = monthly_profit.sort_values('sort_date')
+
+        st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
+
+        # --- 4. DATA EXPORT ---
+        csv = contributions.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Export History (CSV)", data=csv, file_name="susu_records.csv", mime="text/csv")
+        
     else:
         m2.metric("💰 Total Vault", "GHS 0.00")
         m3.metric("📈 Commissions", "GHS 0.00")
         m4.metric("📉 Net Liability", "GHS 0.00")
-        st.warning("🚨 No transaction records found in the system.")
+        st.info("💡 Start recording transactions to see financial data.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
@@ -554,31 +558,31 @@ elif choice == "💸 Transactions":
                     st.warning(f"Deducting Total: GHS {total_deduction:,.2f} (Cash + Fee)")
 
         # --- 3. THE SYNC BUTTON ---
-        # --- 3. THE SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
             if can_save and (db_amt != 0):
+                # Prepare the entry with ISO date to prevent the Pandas crash
                 new_entry = {
                     'amount': float(db_amt),
                     'client_name': target,
-                    'date': trans_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'date': trans_date.isoformat(), # Standardized format for both DBs
                     'fee': float(db_fee),
                     'marks_covered': int(db_marks) if ttype == "Deposit" else 0
                 }
 
-                # Use our new dual-sync function
+                # Run the dual sync
                 is_synced = sync_data_dual(new_entry)
 
                 if is_synced:
-                    # CRITICAL: Clear cache so Dashboard pulls the new totals immediately
+                    # Clear cache so the Dashboard recalculates totals immediately
                     st.cache_data.clear() 
-                    st.success(f"✅ Transaction Secured in Local & Cloud for {target}!")
+                    st.success(f"✅ Transaction Recorded for {target}!")
                     st.balloons()
-                    time.sleep(1) # Small delay for the user to see the success
+                    time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("❌ Sync failed. Please check your internet/database connection.")
+                    st.error("❌ Sync failed. Check connection.")
             else:
-                st.error("Invalid amount or check balance.")
+                st.error("Invalid amount or insufficient balance.")
     else:
         st.warning("Please register clients first.")                 
 
@@ -955,3 +959,17 @@ elif choice == "🛠 Admin Tools":
                     st.write("No logs found.")
             except Exception as e:
                 st.error(f"Log error: {e}")
+        st.subheader("sqlite Local Database Viewer")
+    if st.button("📂 Load Local DB Records"):
+        try:
+            conn_local = sqlite3.connect('susu_data.db')
+            local_df = pd.read_sql_query("SELECT * FROM contributions", conn_local)
+            conn_local.close()
+            
+            if not local_df.empty:
+                st.write(f"Total Local Records: {len(local_df)}")
+                st.dataframe(local_df, use_container_width=True)
+            else:
+                st.info("The local database is empty.")
+        except Exception as e:
+            st.error(f"Could not read local DB: {e}")

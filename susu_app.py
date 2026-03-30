@@ -535,10 +535,10 @@ elif choice == "💸 Transactions":
         if ttype == "Deposit":
             num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
-            db_marks = num_marks
+            db_marks = num_marks # Positive marks for deposit
             st.info(f"💰 Value: GHS {db_amt:,.2f} | 📈 Marks: +{num_marks}")
-           # --- Withdrawal logic --- #
-        else: 
+            
+        else: # --- Withdrawal logic --- #
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
             if is_migration:
                 db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
@@ -548,34 +548,46 @@ elif choice == "💸 Transactions":
             
             total_deduction = requested_cash + db_fee
             
+            # AMENDMENT: Calculate marks to remove based on cash taken
+            # If they take 100 GHS and a mark is 10 GHS, we must subtract 10 marks.
+            # We also subtract the 'fee' mark.
+            if d_mark > 0:
+                marks_to_remove = math.ceil(total_deduction / d_mark)
+                db_marks = -int(marks_to_remove) # Negative marks for withdrawal
+            else:
+                db_marks = 0
+
             if requested_cash > 0:
                 if total_deduction > (total_saved_ghs + 0.01):
                     st.error(f"⚠️ Insufficient Balance! (Available: GHS {total_saved_ghs:,.2f})")
                     can_save = False
                 else:
-                    # IMPORTANT: Ensure db_amt is a clear negative float
                     db_amt = -float(total_deduction)
-                    st.warning(f"Deducting Total: GHS {total_deduction:,.2f} (Cash + Fee)")
+                    st.warning(f"Deducting Total: GHS {total_deduction:,.2f} ({marks_to_remove} Marks)")
 
         # --- 3. THE SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
             if can_save and (db_amt != 0):
-                # Prepare the entry with ISO date to prevent the Pandas crash
+                # Prepare the entry
                 new_entry = {
                     'amount': float(db_amt),
                     'client_name': target,
-                    'date': trans_date.isoformat(), # Standardized format for both DBs
+                    'date': trans_date.isoformat(),
                     'fee': float(db_fee),
-                    'marks_covered': int(db_marks) if ttype == "Deposit" else 0
+                    'marks_covered': int(db_marks) # This now handles both + and - marks
                 }
 
                 # Run the dual sync
                 is_synced = sync_data_dual(new_entry)
 
                 if is_synced:
-                    # Clear cache so the Dashboard recalculates totals immediately
                     st.cache_data.clear() 
                     st.success(f"✅ Transaction Recorded for {target}!")
+                    # Digital Receipt Touch
+                    with st.expander("📄 View Transaction Summary"):
+                        st.write(f"*Client:* {target}")
+                        st.write(f"*Amount:* GHS {abs(db_amt):,.2f}")
+                        st.write(f"*Marks Change:* {db_marks}")
                     st.balloons()
                     time.sleep(1)
                     st.rerun()

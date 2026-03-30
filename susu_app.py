@@ -61,18 +61,24 @@ re_tool = re.compile(r'.*')
 def set_custom_style():
     st.markdown("""
     <style>
-    /* 1. Your existing colors */
+    /* 1. Colors & Branding */
     div.stButton > button:first-child { background-color: #FFD700 !important; color: #212529 !important; font-weight: bold !important; border: none !important; }
     [data-testid="stMetricValue"] { color: #FF4500 !important; font-size: 30px !important; }
     [data-testid="stSidebar"] { background-color: #212529 !important; color: #F8F9FA; }
     
-    /* 2. Hide Streamlit branding to look like a real app */
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* 2. FIXED: Hide MainMenu & Deploy button but KEEP Sidebar Toggle */
     #MainMenu {visibility: hidden;}
+    header [data-testid="stHeader"] {background-color: rgba(0,0,0,0);} /* Makes header transparent */
+    footer {visibility: hidden;}
     
-    /* 3. Make it more mobile-friendly */
-    [data-testid="stAppViewContainer"] { padding-top: 1rem; }
+    /* 3. Mobile Tweaks */
+    [data-testid="stAppViewContainer"] { padding-top: 2rem; }
+    
+    /* Ensure the sidebar toggle button is always visible and clickable */
+    button[kind="header"] {
+        visibility: visible !important;
+        color: #FFD700 !important;
+    }
     </style>
     
     <meta name="apple-mobile-web-app-capable" content="yes">

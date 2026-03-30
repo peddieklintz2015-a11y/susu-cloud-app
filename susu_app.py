@@ -10,32 +10,55 @@ from datetime import datetime
 from sqlalchemy import text
 from email.message import EmailMessage
 from supabase import create_client
-from streamlit_gsheets import GSheetsConnection
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
 # --- UPDATED SYNC LOGIC ---
-def sync_data(new_record, df_context):
+def sync_data_dual(new_record):
+    """Writes to Local SQLite and Cloud PostgreSQL simultaneously."""
+    success_local = False
+    success_cloud = False
+    
+    # 1. LOCAL STORAGE (SQLite)
     try:
-        # 1. SQL Sync
-        conn_sql = sqlite3.connect('susu_data.db')
-        new_record_df = pd.DataFrame([new_record])
-        new_record_df.to_sql('contributions', conn_sql, if_exists='append', index=False)
-        conn_sql.close()
-
-        # 2. Google Sheets Sync 
-        # Using the official .append_table method for st-gsheets-connection
-        gs_conn = st.connection("gsheets", type=GSheetsConnection)
-        gs_conn.create(data=new_record_df, worksheet="Contributions")
-
-        # 3. Update Local DataFrame
-        df_context = pd.concat([df_context, new_record_df], ignore_index=True)
+        conn_local = sqlite3.connect('susu_data.db')
+        # Create table if it doesn't exist (First run safety)
+        conn_local.execute("""
+            CREATE TABLE IF NOT EXISTS contributions 
+            (client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
+        """)
         
-        return df_context, True
+        new_record_df = pd.DataFrame([new_record])
+        # We drop the 'id' if it exists to let SQLite/Postgres auto-increment
+        if 'id' in new_record_df.columns:
+            new_record_df = new_record_df.drop(columns=['id'])
+            
+        new_record_df.to_sql('contributions', conn_local, if_exists='append', index=False)
+        conn_local.close()
+        success_local = True
     except Exception as e:
-        st.error(f"Sync Error: {e}")
-        return df_context, False
+        st.error(f"Local Save Error: {e}")
+
+    # 2. CLOUD STORAGE (PostgreSQL)
+    try:
+        with conn.session as s:
+            s.execute(text("""
+                INSERT INTO contributions (client_name, amount, date, marks_covered, fee)
+                VALUES (:cn, :am, :dt, :mk, :fe)
+            """), {
+                "cn": new_record['client_name'],
+                "am": float(new_record['amount']),
+                "dt": new_record['date'],
+                "mk": int(new_record['marks_covered']),
+                "fe": float(new_record['fee'])
+            })
+            s.commit()
+        success_cloud = True
+    except Exception as e:
+        st.error(f"Cloud Sync Error: {e}")
+
+    return success_local and success_cloud
 
 # --- PWA CONFIGURATION ---
 def pwa_support():
@@ -510,13 +533,12 @@ elif choice == "💸 Transactions":
             db_amt = float(num_marks * d_mark)
             db_marks = num_marks
             st.info(f"💰 Value: GHS {db_amt:,.2f} | 📈 Marks: +{num_marks}")
-        
-        else: # Withdrawal logic
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0)
+           # --- Withdrawal logic --- #
+        else: 
+            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
             if is_migration:
                 db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
             else:
-                # Automatic Fee calculation: 1 mark per cycle/month
                 months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
                 db_fee = float(months_count * d_mark)
             
@@ -527,31 +549,34 @@ elif choice == "💸 Transactions":
                     st.error(f"⚠️ Insufficient Balance! (Available: GHS {total_saved_ghs:,.2f})")
                     can_save = False
                 else:
-                    # Withdrawal recorded as negative total (Cash + Fee)
-                    db_amt = -(requested_cash + db_fee)
+                    # IMPORTANT: Ensure db_amt is a clear negative float
+                    db_amt = -float(total_deduction)
                     st.warning(f"Deducting Total: GHS {total_deduction:,.2f} (Cash + Fee)")
 
+        # --- 3. THE SYNC BUTTON ---
         # --- 3. THE SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
             if can_save and (db_amt != 0):
                 new_entry = {
-                    'amount': db_amt,
+                    'amount': float(db_amt),
                     'client_name': target,
                     'date': trans_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'fee': db_fee,
-                    'id': len(contributions) + 1,
-                    'marks_covered': db_marks if ttype == "Deposit" else 0,
-                    'client_id': client_row['client_id']
+                    'fee': float(db_fee),
+                    'marks_covered': int(db_marks) if ttype == "Deposit" else 0
                 }
 
-                # Running your dual sync helper function
-                contributions, success = sync_data(new_entry, contributions)
+                # Use our new dual-sync function
+                is_synced = sync_data_dual(new_entry)
 
-                if success:
+                if is_synced:
+                    # CRITICAL: Clear cache so Dashboard pulls the new totals immediately
                     st.cache_data.clear() 
-                    st.success(f"✅ Recorded {ttype} for {target}!")
+                    st.success(f"✅ Transaction Secured in Local & Cloud for {target}!")
                     st.balloons()
+                    time.sleep(1) # Small delay for the user to see the success
                     st.rerun()
+                else:
+                    st.error("❌ Sync failed. Please check your internet/database connection.")
             else:
                 st.error("Invalid amount or check balance.")
     else:
@@ -769,7 +794,7 @@ elif choice == "🛠 Admin Tools":
                             
                             st.toast("Security log updated & entry deleted.", icon="🛡️")
                             st.cache_data.clear() 
-                            time.sleep(1)
+                            time.sleep(2)
                             st.rerun()
                         except Exception as e:
                             st.error(f"Action failed: {e}")
@@ -849,7 +874,7 @@ elif choice == "🛠 Admin Tools":
 
                                 st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
                                 st.cache_data.clear() # Forces app to refresh data
-                                time.sleep(1)
+                                time.sleep(1.5)
                                 st.rerun()
                                 
                             except Exception as e:
@@ -896,7 +921,7 @@ elif choice == "🛠 Admin Tools":
 
                 st.success("💥 System wiped successfully!")
                 st.cache_data.clear()
-                time.sleep(1)
+                time.sleep(2)
                 st.rerun()
                 
             except Exception as e:

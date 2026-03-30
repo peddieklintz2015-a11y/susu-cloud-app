@@ -350,24 +350,6 @@ with st.container():
     else:
         v_sum = 0.0
 
-    # 2. Horizontal Layout (4 columns)
-    # [3, 1, 1, 2] means the Title and Vault get more space than the simple counts
-    st_c1, st_c2, st_c3, st_c4 = st.columns([3, 1, 1, 2])
-
-    with st_c1:
-        st.markdown("#### ⚡ Live System Monitor")
-    
-    with st_c2:
-        st.markdown(f"👥 **Clients** \n`{c_num}`")
-    
-    with st_c3:
-        st.markdown(f"📝 **Trans.** \n`{t_num}`")
-    
-    with st_c4:
-        st.markdown(f"💰 **Total Vault** \n`GHS {v_sum:,.2f}`")
-
-    st.divider()
-
 # --- SMART AUTO-REPORT TRIGGER ---
 now = datetime.now()
 # 6 = Sunday, and hour >= 8 means 8 AM or later
@@ -411,12 +393,25 @@ with st.sidebar:
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    # 1. Header & Quick Refresh
-    head_col, btn_col = st.columns([4, 2])
+    # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---
+    with st.sidebar:
+        st.divider()
+        with st.expander("🕒 Quick Activity Log", expanded=False):
+            if not contributions.empty:
+                st.dataframe(
+                    contributions.tail(5).sort_values(by='date', ascending=False),
+                    column_order=("client_name", "amount"),
+                    hide_index=True
+                )
+            else:
+                st.info("No activity yet.")
+
+    # --- 2. MAIN DASHBOARD UI ---
+    head_col, btn_col = st.columns([4, 1])
     with head_col:
         st.title("📊 Financial Overview")
     with btn_col:
-        if st.button("🔄 Sync & Refresh"):
+        if st.button("🔄 Sync"):
             st.cache_data.clear()
             st.rerun()
 
@@ -426,17 +421,14 @@ if choice == "📊 Dashboard":
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
     if not contributions.empty:
-        # Create a copy for date processing to avoid SettingWithCopy warnings
         df_display = contributions.copy()
         df_display['date_dt'] = pd.to_datetime(df_display['date'], errors='coerce', utc=True)
         df_display = df_display.dropna(subset=['date_dt'])
         
-        # Calculate Totals
         total_vault = df_display['amount'].sum()
         total_commissions = df_display['fee'].sum()
         net_liability = total_vault - total_commissions 
         
-        # --- DAILY DIFFERENCE LOGIC ---
         today_date = datetime.now().date()
         yesterday_date = today_date - pd.Timedelta(days=1)
         
@@ -444,37 +436,25 @@ if choice == "📊 Dashboard":
         yesterday_total = df_display[df_display['date_dt'].dt.date == yesterday_date]['amount'].sum()
         daily_diff = today_total - yesterday_total
 
-        # Display Metrics
-        m2.metric(
-            label="💰 Total Vault", 
-            value=f"GHS {total_vault:,.2f}",
-            delta=f"GHS {today_total:,.2f} Today"
-        )
+        m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}", delta=f"GHS {today_total:,.2f} Today")
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
-        m4.metric(
-            label="📉 Net Liability", 
-            value=f"GHS {net_liability:,.2f}",
-            delta=f"Diff: GHS {daily_diff:,.2f}",
-            delta_color="inverse" 
-        )
+        m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}", delta=f"Diff: GHS {daily_diff:,.2f}", delta_color="inverse")
 
         # --- 3. MONTHLY PROFIT CHART ---
-        st.write("---") # Visual separator
+        st.divider()
         st.subheader("📈 Monthly Commission Growth")
         
-        # Grouping by month
         df_display['Month'] = df_display['date_dt'].dt.strftime('%b %Y')
         monthly_profit = df_display.groupby('Month')['fee'].sum().reset_index()
-        
-        # Sorting by date to ensure the chart flows correctly
         monthly_profit['sort_date'] = pd.to_datetime(monthly_profit['Month'])
         monthly_profit = monthly_profit.sort_values('sort_date')
 
         st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
 
         # --- 4. DATA EXPORT ---
-        csv = contributions.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Export History (CSV)", data=csv, file_name="susu_records.csv", mime="text/csv")
+        with st.expander("📥 Download Records"):
+            csv = contributions.to_csv(index=False).encode('utf-8')
+            st.download_button("Download CSV", data=csv, file_name="susu_records.csv", mime="text/csv")
         
     else:
         m2.metric("💰 Total Vault", "GHS 0.00")
@@ -585,16 +565,14 @@ elif choice == "💸 Transactions":
                     st.success(f"✅ Transaction Recorded for {target}!")
                     # Digital Receipt Touch
                     with st.expander("📄 View Transaction Summary"):
-                        st.write(f"*Client:* {target}")
-                        st.write(f"*Amount:* GHS {abs(db_amt):,.2f}")
-                        st.write(f"*Marks Change:* {db_marks}")
+                        st.write(f"**Client:** {target}")
+                        st.write(f"**Amount:** GHS {abs(db_amt):,.2f}")
+                        st.write(f"**Marks Change:** {db_marks}")
                     st.balloons()
                     time.sleep(1)
                     st.rerun()
                 else:
                     st.error("❌ Sync failed. Check connection.")
-            else:
-                st.error("Invalid amount or insufficient balance.")
     else:
         st.warning("Please register clients first.")                 
 

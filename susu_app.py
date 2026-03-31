@@ -841,38 +841,62 @@ elif choice == "🛠 Admin Tools":
         
         st.divider()
 
-        # 2. Deletion Logic (Logged version)
+        # 2. Reversal Logic
         st.subheader("🛑 Restricted Data Cleanup")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
         
         if admin_entry == st.secrets["passwords"]["admin_password"]:
             if not contributions.empty:
                 search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
+                
+                # Filter the dataframe based on search
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
                 
                 if not f_df.empty:
-                    # --- ALL OF THIS MUST BE INDENTED FURTHER ---
+                    # Create the display string for the dropdown
                     f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-                    to_del = st.selectbox("Select entry to PERMANENTLY REMOVE", options=f_df['display'], key="delete_selector")
                     
-                    if st.button("🗑️ Authorize Permanent Wipe"):
+                    to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
+                    
+                    if st.button("🔄 Authorize Professional Reversal"):
                         try:
+                            # Extract the numeric ID
                             selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
-                            with conn.session as s:
-                                s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": selected_id})
-                                s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('WIPE', :d, 'Manager')"), 
-                                         {"d": f"Wiped record {selected_id}"})
-                                s.commit()
-                            st.success(f"💥 Record {selected_id} vanished!")
-                            st.cache_data.clear()
-                            time.sleep(1)
-                            st.rerun()
+                            # Get the specific row data
+                            target_row = f_df[f_df['id'] == selected_id].iloc[0]
+
+                            # Create the "Mirror" entry (Negative values)
+                            reversal_entry = {
+                                'amount': -float(target_row['amount']),
+                                'client_name': target_row['client_name'],
+                                'date': datetime.now().isoformat(),
+                                'fee': 0.0,
+                                'marks_covered': -int(target_row['marks_covered']),
+                                'client_id': target_row.get('client_id', 'N/A')
+                            }
+
+                            # Sync the reversal entry to the database
+                            if sync_data_dual(reversal_entry):
+                                with conn.session as s:
+                                    # Log the action in Audit Logs
+                                    s.execute(text("""
+                                        INSERT INTO audit_logs (action_type, details, admin_name) 
+                                        VALUES ('REVERSAL', :d, 'Manager')
+                                    """), {
+                                        "d": f"Professional Reversal of ID {selected_id} for {target_row['client_name']}"
+                                    })
+                                    s.commit()
+                                
+                                st.success(f"✅ Transaction balanced. A negative entry for GHS {target_row['amount']} was added.")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
                         except Exception as e:
-                            st.error(f"Error: {e}")
+                            st.error(f"🚨 Reversal Failed: {e}")
                 else:
                     st.info("No matching entries found.")
             else:
-                st.info("No transactions to clean.")
+                st.info("No transactions available to reverse.") 
 
     with t4:
         st.subheader("⚙️ Secure Client Profile Manager")

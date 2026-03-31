@@ -14,32 +14,35 @@ from supabase import create_client
 # --- 1. SETUP ---
 st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
 
-# --- UPDATED SYNC LOGIC ---
+# --- DATABASE CONNECTIONS & SYNC LOGIC ---
+conn = st.connection("postgresql", type="sql")
+menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+
+try:
+    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+except Exception as e:
+    st.error(f"Supabase Error: {e}") 
+    st.stop()
+
 def sync_data_dual(new_record):
-    """Writes to Local SQLite and Cloud PostgreSQL simultaneously with standardized dates."""
+    """Writes to Local SQLite and Cloud PostgreSQL simultaneously."""
     success_local = False
     success_cloud = False
-    
-    # 1. LOCAL STORAGE (SQLite)
     try:
         conn_local = sqlite3.connect('susu_data.db')
         conn_local.execute("""
             CREATE TABLE IF NOT EXISTS contributions 
             (client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
         """)
-        
-        # Standardize record for SQLite
         local_df = pd.DataFrame([new_record])
         if 'id' in local_df.columns:
             local_df = local_df.drop(columns=['id'])
-            
         local_df.to_sql('contributions', conn_local, if_exists='append', index=False)
         conn_local.close()
         success_local = True
     except Exception as e:
         st.error(f"Local Save Error: {e}")
 
-    # 2. CLOUD STORAGE (PostgreSQL)
     try:
         with conn.session as s:
             s.execute(text("""
@@ -48,7 +51,7 @@ def sync_data_dual(new_record):
             """), {
                 "cn": new_record['client_name'],
                 "am": float(new_record['amount']),
-                "dt": new_record['date'], # Already ISO string from the button logic
+                "dt": new_record['date'],
                 "mk": int(new_record['marks_covered']),
                 "fe": float(new_record['fee'])
             })
@@ -56,7 +59,6 @@ def sync_data_dual(new_record):
         success_cloud = True
     except Exception as e:
         st.error(f"Cloud Sync Error: {e}")
-
     return success_local and success_cloud
 
 # --- PWA CONFIGURATION ---
@@ -107,7 +109,6 @@ def set_custom_style():
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#212529">
     """, unsafe_allow_html=True)
-
 # Run UI Enhancements
 set_custom_style()
 
@@ -118,31 +119,6 @@ if st.secrets["app_settings"]["maintenance_mode"]:
     st.warning("RUCHANET DAILY SUSU is currently undergoing scheduled updates.")
     st.info("We'll be back online shortly! 🙏")
     st.stop()
-
-# --- 4. DATABASE CONNECTIONS ---
-conn = st.connection("postgresql", type="sql")
-menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
-try:
-    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-except Exception as e:
-    st.error(f"Supabase Error: {e}") 
-    st.stop()
-
-# --- 6. NAVIGATION & INSTALL GUIDE ---
-with st.sidebar:
-    st.title("📱 App Options")
-    
-    # Combined Install Guide
-    if st.checkbox("Show Install Guide"):
-        st.info("""
-        *To Install on Phone:*
-        * *Android:* Tap ⋮ and 'Install App'.
-        * *iOS:* Tap Share 📤 and 'Add to Home Screen'.
-        """)
-    
-    st.divider()
-
-set_custom_style()
 
 # --- 3. DATA FUNCTIONS ---
 @st.cache_data(ttl=60)
@@ -163,6 +139,15 @@ def fetch_data():
     except Exception as e:
         st.error(f"Mapping Error: {e}")
         return pd.DataFrame(), pd.DataFrame()
+    
+def draw_sidebar_log(df):
+    with st.sidebar:
+        st.divider()
+        with st.expander("🕒 Quick Activity Log", expanded=False):
+            if not df.empty:
+                st.dataframe(df.tail(5).sort_values(by='date', ascending=False), column_order=("client_name", "amount"), hide_index=True)
+            else:
+                st.info("No activity yet.")
 
 def send_weekly_report(contributions_df, manual=False):
     try:
@@ -245,22 +230,6 @@ def send_weekly_report(contributions_df, manual=False):
         if manual: 
             st.error(f"Error: {e}")
         return False
-    
-# --- 1. DEFINE THE SIDEBAR LOG FUNCTION ---
-# This is the "blueprint" for that circled table. 
-# It won't show up until we specifically tell it to.
-def draw_sidebar_log(df):
-    with st.sidebar:
-        st.divider()
-        with st.expander("🕒 Quick Activity Log", expanded=False):
-            if not df.empty:
-                st.dataframe(
-                    df.tail(5).sort_values(by='date', ascending=False),
-                    column_order=("client_name", "amount"),
-                    hide_index=True
-                )
-            else:
-                st.info("No activity yet.")
 
 def get_next_gen_id(reg_date):
     # Format month and year: e.g., "03/26"
@@ -348,12 +317,6 @@ else:
     # If no clients yet, we can't merge anything
     combined_df = contributions
 
-# --- DISPLAY DATA ---
-if not combined_df.empty:
-    st.dataframe(combined_df)
-else:
-    st.write("No data to display yet.")
-
     # --- 5.5 COMPACT SYSTEM STATUS BAR ---
 with st.container():
     # 1. Prepare Data Safely
@@ -376,10 +339,14 @@ if now.weekday() == 6 and now.hour >= 8:
             st.session_state[backup_key] = True
             st.toast(f"📧 Sunday Report Sent at {now.strftime('%I:%M %p')}", icon="📅")
 
-# --- 6. NAVIGATION ---
+# --- SIDEBAR (NAVIGATION FIRST) ---
 with st.sidebar:
     st.title("📱 App Options")
     
+    # 1. NAVIGATION AT THE TOP
+    choice = st.selectbox("Go To:", menu)
+    
+    st.divider()
     # --- NETWORK & SCHEMA HEALTH CHECK ---
     try:
         # Check if we can connect to the database
@@ -401,10 +368,10 @@ with st.sidebar:
         <p style="margin:0; font-weight: bold;">Cloud: {db_status} | {schema_status}</p>
     </div>
     """, unsafe_allow_html=True)
+    if st.checkbox("Show Install Guide"):
+        st.info("Android: Tap ⋮ and 'Install'. \niOS: Tap Share and 'Add to Home Screen'.")
     
     st.divider()
-
-choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
     # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---

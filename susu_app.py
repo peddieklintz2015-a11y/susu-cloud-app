@@ -634,8 +634,16 @@ elif choice == "📑 Digital Passbook":
             st.write("### 📝 Transaction History")
             if not user_history.empty:
                 user_h_display = user_history.copy()
-                # Clean up date formatting for display
-                user_h_display['date'] = pd.to_datetime(user_h_display['date']).dt.strftime('%Y-%m-%d %I:%M %p')
+                
+                # SAFE DATE CONVERSION:
+                # We use errors='coerce' and check if it's already a string first
+                user_h_display['date'] = pd.to_datetime(user_h_display['date'], errors='coerce')
+                
+                # Filter out any rows where the date failed to convert
+                user_h_display = user_h_display.dropna(subset=['date'])
+                
+                # Now format it for the UI
+                user_h_display['date'] = user_h_display['date'].dt.strftime('%Y-%m-%d %I:%M %p')
                 
                 # Filter display columns safely
                 cols = [c for c in ['date', 'amount', 'marks_covered', 'fee'] if c in user_h_display.columns]

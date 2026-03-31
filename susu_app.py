@@ -484,7 +484,7 @@ elif choice == "💸 Transactions":
             db_marks = int(num_marks) 
             st.info(f"➕ **Deposit:** GHS {db_amt:,.2f} | 📈 **Marks:** +{num_marks}")
             
-        else: # --- Withdrawal Logic with math.ceil ---
+        else: # --- Withdrawal Logic with math.ceil and Hard Locks ---
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
             
             if is_migration:
@@ -493,69 +493,68 @@ elif choice == "💸 Transactions":
             else:
                 db_fee = float(d_mark)
                 if d_mark > 0:
+                    # 1. THE MULTIPLE CHECK: Hard lock if amount isn't divisible by the Daily Mark
+                    if requested_cash % d_mark != 0:
+                        st.error(f"🚫 Invalid Amount! Withdrawal must be a multiple of the Daily Mark (GHS {d_mark}).")
+                        st.stop() # This prevents the script from reaching the Sync button below
+                    
+                    # 2. THE MATH CEIL: Ensures 'math' import is used and rounding is correct
+                    # We use math.ceil to ensure any fractional division rounds UP to the next mark
                     marks_to_remove = math.ceil(requested_cash / d_mark) + 1
                     db_marks = -int(marks_to_remove)
                 else:
                     db_marks = 0
 
-            # 1. DEFINE TOTAL DEDUCTION FIRST (Fixes your VS Code errors)
+            # 3. DEFINE TOTAL DEDUCTION
             total_deduction = requested_cash + db_fee
 
-            # 2. START UNIVERSAL MANAGER OVERRIDE GATE
-            # We removed 'not is_migration' so it now applies to EVERY transaction
+            # 4. UNIVERSAL MANAGER OVERRIDE GATE (The 31-mark rule)
             if abs(db_marks) < 31:
                 st.warning(f"⚠️ Transaction involves only {abs(db_marks)} marks (Minimum 31 required).")
                 
                 if st.session_state.get("role") == "Manager":
                     override = st.checkbox("🔓 Authorize Emergency Withdrawal (Manager Only)")
                     if not override:
-                        st.info("Please check the box above to bypass the 31-mark rule.")
+                        st.info("Please check the box above to enable the Sync button.")
                         st.stop()
                 else:
                     st.error("🚫 Only a Manager can authorize withdrawals under 31 marks.")
                     st.stop()
-            # 3. END OVERRIDE GATE
 
+            # 5. CASH & MARKS VALIDATION
             if requested_cash > 0 or is_migration:
                 if not is_migration:
                     if total_marks_saved < abs(db_marks):
                         st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
-                        can_save = False
+                        st.stop()
                     elif total_deduction > (total_saved_ghs + 0.01):
                         st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
-                        can_save = False
+                        st.stop()
                     else:
                         db_amt = -float(requested_cash)
                         st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
                 else:
                     db_amt = -float(requested_cash)
             
-        # --- 3. THE SYNC BUTTON ---
+        # --- 6. THE SYNC BUTTON (Safely isolated) ---
+        # The code only gets here if none of the st.stop() commands were triggered.
         if st.button("🚀 Confirm & Sync Transaction"):
-            if can_save and (db_amt != 0 or db_marks != 0):
-                new_entry = {
-                    'amount': float(db_amt),
-                    'client_name': target,
-                    'date': trans_date.isoformat(),
-                    'fee': float(db_fee),
-                    'marks_covered': int(db_marks)
-                }
+            new_entry = {
+                'amount': float(db_amt),
+                'client_name': target,
+                'date': trans_date.isoformat(),
+                'fee': float(db_fee),
+                'marks_covered': int(db_marks)
+            }
 
-                if sync_data_dual(new_entry):
-                    st.cache_data.clear() 
-                    st.success(f"✅ Transaction Synced for {target}!")
-                    
-                    with st.expander("📄 View Summary"):
-                        st.write(f"**Client ID:** {c_id}")
-                        st.write(f"**Net Amount:** GHS {db_amt:,.2f}")
-                        st.write(f"**Fee Taken:** GHS {db_fee:,.2f}")
-                        st.write(f"**Marks Change:** {db_marks}")
-                    
-                    st.balloons()
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Sync failed. Check internet.")
+            if sync_data_dual(new_entry):
+                st.cache_data.clear() 
+                st.success(f"✅ Transaction Synced for {target}!")
+                st.balloons()
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Sync failed. Check internet.")
     else:
         st.warning("Please register clients in Admin Tools first.")                 
 

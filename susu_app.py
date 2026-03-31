@@ -268,35 +268,54 @@ def get_next_gen_id(reg_date):
         # Fallback to 001 if something goes wrong
         return f"001/{mm_yy}"
     
-# --- 4. SECURITY ---
+# --- UPDATE SECURITY SECTION ---
 def check_password():
+    # If no role is set, show the login screen
     if "role" not in st.session_state:
         st.title("🔐 RUCHANET SYSTEM LOGIN")
         col1, col2 = st.columns(2)
         
         with col1:
             with st.form("agent_login"):
-                st.subheader("👤 Agent Access")
-                st.write("For daily collections and passbook viewing.")
-                if st.form_submit_button("Enter as Agent"):
+                st.subheader("👤 Agent Login")
+                if st.form_submit_button("Access Collector Tools"):
                     st.session_state["role"] = "Agent"
                     st.rerun()
         
         with col2:
             with st.form("admin_login"):
-                st.subheader("🛡️ Manager Access")
+                st.subheader("🛡️ Manager Login")
+                # Using a placeholder for secrets if not set for testing
                 pwd = st.text_input("Manager Password", type="password")
                 if st.form_submit_button("Verify Identity"):
-                    if pwd == st.secrets["passwords"]["login_password"]:
+                    # Replace with your actual st.secrets logic
+                    if pwd == "admin123": 
                         st.session_state["role"] = "Manager"
                         st.rerun()
                     else:
-                        st.error("❌ Invalid Manager Password")
+                        st.error("Invalid Manager Password")
         return False
+    
+    # --- ADDED: LOGOUT / SWITCH USER FUNCTIONALITY ---
+    # This adds a button to the sidebar to clear the session
+    st.sidebar.markdown(f"*Logged in as: {st.session_state['role']}*")
+    if st.sidebar.button("Logout / Switch User"):
+        del st.session_state["role"]
+        st.rerun()
+        
     return True
 
-if not check_password():
-    st.stop()
+# Run the security check
+if check_password():
+    # Adjust menu based on role
+    if st.session_state.get("role") == "Manager":
+        menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+    else:
+        menu = ["💸 Transactions", "📑 Digital Passbook"]
+
+    # Display the navigation
+    st.sidebar.selectbox("Navigation", menu)
+    st.write(f"Welcome to the {st.session_state['role']} interface.")
 
 # --- DYNAMIC MENU BASED ON ROLE ---
 if st.session_state.get("role") == "Manager":
@@ -562,22 +581,32 @@ elif choice == "💸 Transactions":
                 db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
                 db_marks = st.number_input("Marks to Deduct (Enter as negative, e.g. -31)", value=0, step=1)
             else:
-                # YOUR ORIGINAL LOGIC RE-INSTATED:
-                # 1. Determine Fee (1 mark)
                 db_fee = float(d_mark)
-                
-                # 2. Calculate marks to remove using math.ceil
                 if d_mark > 0:
-                    # Cash / Mark rate, rounded up, plus the 1 commission mark
                     marks_to_remove = math.ceil(requested_cash / d_mark) + 1
                     db_marks = -int(marks_to_remove)
                 else:
                     db_marks = 0
 
+            # 1. DEFINE TOTAL DEDUCTION FIRST (Fixes your VS Code errors)
             total_deduction = requested_cash + db_fee
 
+            # 2. START UNIVERSAL MANAGER OVERRIDE GATE
+            # We removed 'not is_migration' so it now applies to EVERY transaction
+            if abs(db_marks) < 31:
+                st.warning(f"⚠️ Transaction involves only {abs(db_marks)} marks (Minimum 31 required).")
+                
+                if st.session_state.get("role") == "Manager":
+                    override = st.checkbox("🔓 Authorize Emergency Withdrawal (Manager Only)")
+                    if not override:
+                        st.info("Please check the box above to bypass the 31-mark rule.")
+                        st.stop()
+                else:
+                    st.error("🚫 Only a Manager can authorize withdrawals under 31 marks.")
+                    st.stop()
+            # 3. END OVERRIDE GATE
+
             if requested_cash > 0 or is_migration:
-                # Validation Gate
                 if not is_migration:
                     if total_marks_saved < abs(db_marks):
                         st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
@@ -589,9 +618,8 @@ elif choice == "💸 Transactions":
                         db_amt = -float(requested_cash)
                         st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
                 else:
-                    # In migration, we use the values exactly as entered
                     db_amt = -float(requested_cash)
-
+            
         # --- 3. THE SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
             if can_save and (db_amt != 0 or db_marks != 0):

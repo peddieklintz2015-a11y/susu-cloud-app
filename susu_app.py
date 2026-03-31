@@ -339,16 +339,16 @@ if now.weekday() == 6 and now.hour >= 8:
             st.session_state[backup_key] = True
             st.toast(f"📧 Sunday Report Sent at {now.strftime('%I:%M %p')}", icon="📅")
 
-# --- SIDEBAR (NAVIGATION FIRST) ---
+# --- 6. CONSOLIDATED SIDEBAR UI ---
 with st.sidebar:
     st.title("📱 App Options")
     
-    # 1. NAVIGATION FIRST (Now at the very top)
-    choice = st.selectbox("Go To:", menu)
+    # 1. NAVIGATION (Now at the very top)
+    choice = st.sidebar.selectbox("Go To:", menu)
     
     st.divider()
 
-    # 2. COMBINED INSTALL GUIDE
+    # 2. COMBINED INSTALL GUIDE (Only one instance to avoid error)
     if st.checkbox("Show Install Guide"):
         st.info("""
         To Install on Phone:

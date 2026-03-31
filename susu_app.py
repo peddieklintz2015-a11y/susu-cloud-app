@@ -139,15 +139,25 @@ def fetch_data():
     except Exception as e:
         st.error(f"Mapping Error: {e}")
         return pd.DataFrame(), pd.DataFrame()
-    
+# --- 1. THE SECURITY DEFINITION ---
 def check_password():
+    """Returns True if the user is authenticated, else shows login and STOPS."""
     if "role" not in st.session_state:
         st.title("🔐 RUCHANET SYSTEM LOGIN")
+        
+        # This CSS hides the sidebar specifically on the login page
+        st.markdown("""
+            <style>
+                [data-testid="stSidebar"] { display: none; }
+            </style>
+        """, unsafe_allow_html=True)
+
         col1, col2 = st.columns(2)
         
         with col1:
             with st.form("agent_login"):
                 st.subheader("👤 Agent Login")
+                st.info("Field Collector Access")
                 if st.form_submit_button("Access Collector Tools"):
                     st.session_state["role"] = "Agent"
                     st.rerun()
@@ -157,23 +167,44 @@ def check_password():
                 st.subheader("🛡️ Manager Login")
                 pwd = st.text_input("Manager Password", type="password")
                 if st.form_submit_button("Verify Identity"):
+                    # Linked to 'login_password' (Line 11 in your secrets.toml)
                     if pwd == st.secrets["passwords"]["login_password"]: 
                         st.session_state["role"] = "Manager"
                         st.rerun()
                     else:
                         st.error("Invalid Manager Password")
         
-        # --- THIS IS THE SECRET SAUCE ---
-        st.stop() # This prevents EVERYTHING below this line from running
+        # STOP EVERYTHING HERE until a role is set
+        st.stop() 
         
     return True
 
-# Now, call the function at the start of your app
-check_password()
-
-# EVERYTHING BELOW HERE IS NOW SAFE
-# It will only run if check_password() didn't hit st.stop()
-role = st.session_state.get("role")
+# --- 2. THE SECURITY GATE ---
+# Call the function. If not logged in, the script dies at st.stop() above.
+if check_password():
+    
+    # --- 3. THE LOGOUT & NAVIGATION SECTION ---
+    # This only runs AFTER a successful login
+    with st.sidebar:
+        st.title("📱 App Options")
+        st.success(f"Logged in as: **{st.session_state['role']}**")
+        
+        if st.button("🚪 Logout / Sign Out", use_container_width=True):
+            # Clear the role and reset the app
+            del st.session_state["role"]
+            st.cache_data.clear()
+            st.rerun()
+        
+        st.divider()
+        
+        # Define menu based on role
+        if st.session_state["role"] == "Manager":
+            menu_options = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+        else:
+            menu_options = ["💸 Transactions", "📑 Digital Passbook"]
+            
+        choice = st.selectbox("Go To:", menu_options)
+        st.divider()
     
 def draw_sidebar_log(df):
         st.divider()

@@ -141,7 +141,6 @@ def fetch_data():
         return pd.DataFrame(), pd.DataFrame()
     
 def draw_sidebar_log(df):
-    with st.sidebar:
         st.divider()
         with st.expander("🕒 Quick Activity Log", expanded=False):
             if not df.empty:

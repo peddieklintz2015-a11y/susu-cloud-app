@@ -532,7 +532,6 @@ elif choice == "📑 Digital Passbook":
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if not clients.empty:
-        # Filter based on search input
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
         
         if not filtered.empty:
@@ -540,66 +539,90 @@ elif choice == "📑 Digital Passbook":
             c_info = clients[clients['client_name'] == target].iloc[0]
             
             # --- AGGREGATE DATA ---
+            user_history = pd.DataFrame()
             if not contributions.empty and 'client_name' in contributions.columns:
                 user_history = contributions[contributions['client_name'] == target].copy()
                 total_marks = int(user_history['marks_covered'].sum())
                 current_balance = float(user_history['amount'].sum())
+                # Sort to show newest first
+                user_history = user_history.sort_values(by='date', ascending=False)
             else:
-                user_history = pd.DataFrame()
                 total_marks = 0
                 current_balance = 0.0
             
-            # --- UI PROFILE DISPLAY ---
+            # --- UI PROFILE ---
             col_a, col_b = st.columns([1, 2])
             with col_a:
                 photo = c_info.get('photo_url')
                 if photo and str(photo) not in ['None', 'nan', '']:
                     st.image(photo, use_container_width=True)
-                else:
-                    st.info("📷 No Photo")
             
             with col_b:
                 st.subheader(f"User: {target}")
-                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
-                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
-                # ADDED: Daily Mark row in the profile text
-                st.write(f"🏷️ **Daily Mark Rate:** GHS {c_info.get('daily_mark', 0.0):,.2f}")
-                
-                # Metrics Row
-                m1, m2, m3 = st.columns(3)
+                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')} | 🏷️ **Rate:** GHS {c_info.get('daily_mark', 0.0):,.2f}")
+                m1, m2 = st.columns(2)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
-                m2.metric("📅 Marks", f"{total_marks}")
-                # ADDED: Daily Mark as a metric for quick viewing
-                m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
+                m2.metric("📅 Total Marks", f"{total_marks}")
 
             st.divider()
             
-            # --- ACTION ROW ---
-            # Updated WhatsApp message to include the Daily Mark
-            raw_phone = str(c_info.get('phone', ''))
-            formatted_phone = f"233{raw_phone[-9:]}"
-            daily_rate = c_info.get('daily_mark', 0.0)
-            
-            wa_msg = (
-                f"📑 *RUCHANET PASSBOOK*%0A"
-                f"👤 *Client:* {target}%0A"
-                f"🏷️ *Daily Rate:* GHS {daily_rate:,.2f}%0A"
-                f"💰 *Balance:* GHS {current_balance:,.2f}%0A"
-                f"📅 *Total Marks:* {total_marks}"
-            )
-            
-            st.markdown(f'''
-                <a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">
-                    <button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
-                        🟢 Share to WhatsApp
-                    </button>
-                </a>
-            ''', unsafe_allow_html=True)
-            
-            # Transaction Table
+            # --- TRANSACTION HISTORY & RECEIPT GENERATOR ---
+            st.subheader("📜 Transaction History")
             if not user_history.empty:
-                st.write("### 📜 Transaction History")
-                st.dataframe(user_history[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+                for idx, row in user_history.iterrows():
+                    # Create a clean display for each transaction row
+                    t_date = pd.to_datetime(row['date']).strftime('%Y-%m-%d %H:%M')
+                    t_amt = float(row['amount'])
+                    t_type = "Deposit" if t_amt > 0 else "Withdrawal"
+                    
+                    with st.expander(f"{t_date} | {t_type} | GHS {abs(t_amt):,.2f}"):
+                        col_text, col_print = st.columns([2, 1])
+                        
+                        with col_text:
+                            st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
+                            st.write(f"**Marks:** {row['marks_covered']}")
+                            st.write(f"**Fee:** GHS {row.get('fee', 0.0):,.2f}")
+
+                        with col_print:
+                            # THE THERMAL RECEIPT COMPONENT
+                            receipt_html = f"""
+                            <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 10px; background: white; color: black; border: 1px solid #000;">
+                                <center>
+                                    <h4 style="margin:0;">RUCHANET DAILY SUSU</h4>
+                                    <p style="font-size:10px;">Digital Passbook Copy</p>
+                                </center>
+                                <hr>
+                                <p style="font-size:12px;">
+                                    <b>Date:</b> {t_date}<br>
+                                    <b>Client:</b> {target}<br>
+                                    <b>ID:</b> {c_info.get('client_id')}<br>
+                                    <b>Type:</b> {t_type}<br>
+                                    ----------------------------<br>
+                                    <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
+                                    <b>Fee:</b> GHS {row.get('fee', 0.0):,.2f}<br>
+                                    <b>Marks:</b> {row['marks_covered']}<br>
+                                    ----------------------------<br>
+                                    <b>Verified Digital Record</b>
+                                </p>
+                            </div>
+                            <button onclick="printReceipt('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+                            
+                            <script>
+                            function printReceipt(divId) {{
+                                var content = document.getElementById(divId).innerHTML;
+                                var myWindow = window.open('', '', 'width=350,height=600');
+                                myWindow.document.write('<html><head><title>Print Receipt</title></head><body style="margin:0;padding:20px;">');
+                                myWindow.document.write(content);
+                                myWindow.document.write('</body></html>');
+                                myWindow.document.close();
+                                myWindow.focus();
+                                setTimeout(function(){{ myWindow.print(); myWindow.close(); }}, 250);
+                            }}
+                            </script>
+                            """
+                            components.html(receipt_html, height=350)
+            else:
+                st.info("No transaction history found.")
         else:
             st.warning("No client found.")
     else:

@@ -271,36 +271,51 @@ def get_next_gen_id(reg_date):
 # --- UPDATE SECURITY SECTION ---
 def check_password():
     if "role" not in st.session_state:
-        # ... (Your Login UI Code) ...
+        st.title("🔐 RUCHANET SYSTEM LOGIN")
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.form("agent_login"):
+                st.subheader("👤 Agent Login")
+                if st.form_submit_button("Access Collector Tools"):
+                    st.session_state["role"] = "Agent"
+                    st.rerun()
+        with col2:
+            with st.form("admin_login"):
+                st.subheader("🛡️ Manager Login")
+                pwd = st.text_input("Manager Password", type="password")
+                if st.form_submit_button("Verify Identity"):
+                    if pwd == st.secrets["passwords"]["login_password"]: 
+                        st.session_state["role"] = "Manager"
+                        st.rerun()
+                    else:
+                        st.error("Invalid Manager Password")
         return False
     
-    # Show logout in sidebar
-    st.sidebar.markdown(f"**Current User: {st.session_state['role']}**")
+    # Logout button for when they ARE logged in
+    st.sidebar.markdown(f"*Current User: {st.session_state['role']}*")
     if st.sidebar.button("Logout / Switch User"):
         del st.session_state["role"]
         st.rerun()
     return True
 
- # --- THE ONLY GATEKEEPER ---
+# --- 2. THE SECURITY GATE ---
+# Everything below this line MUST be indented!
 if check_password():
-    # ALL application logic must stay inside this IF block
-    role = st.session_state.get("role")
     
+    # 2a. Fetch Data only after login
+    clients, contributions = fetch_data()
+    role = st.session_state.get("role")
+
+    # 2b. Define Menu based on Role
     if role == "Manager":
         menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
     else:
         menu = ["💸 Transactions", "📑 Digital Passbook"]
 
-    # Now define your 'selection' and show the pages
-    selection = st.sidebar.selectbox("Navigation", menu)
-    
-    if selection == "📑 Digital Passbook":
-        # INSERT YOUR PASSBOOK CODE HERE (Indented!)
-        st.write("This is the Passbook.")
-        
-    elif selection == "💸 Transactions":
-        # INSERT YOUR WITHDRAWAL CODE HERE (Indented!)
-        st.write("This is the Transaction page.")
+    # 2c. Sidebar Navigation
+    with st.sidebar:
+        st.title("📱 RUCHANET APP")
+        choice = st.selectbox("Go To:", menu)
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()

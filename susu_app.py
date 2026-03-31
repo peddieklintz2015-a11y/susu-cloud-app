@@ -1,14 +1,13 @@
 import streamlit as st
+from utils import send_weekly_report
 import streamlit.components.v1 as components
 import pandas as pd
 import sqlite3
 import time
 import re
 import math
-import smtplib
 from datetime import datetime
 from sqlalchemy import text
-from email.message import EmailMessage
 from supabase import create_client
 
 # --- 1. SETUP ---
@@ -200,88 +199,6 @@ def draw_sidebar_log(df):
                 st.dataframe(df.tail(5).sort_values(by='date', ascending=False), column_order=("client_name", "amount"), hide_index=True)
             else:
                 st.info("No activity yet.")
-
-def send_weekly_report(contributions_df, manual=False):
-    try:
-        now_dt = datetime.now()
-        today = now_dt.date()
-        start_of_week = today - pd.Timedelta(days=today.weekday())
-        end_of_week = start_of_week + pd.Timedelta(days=6)
-        
-        week_data = contributions_df[
-            (contributions_df['date'].dt.date >= start_of_week) & 
-            (contributions_df['date'].dt.date <= end_of_week)
-        ].copy()
-        
-        if week_data.empty and not manual:
-            return False 
-
-        week_data['Day'] = week_data['date'].dt.strftime('%A')
-        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        summary = week_data.groupby('Day').agg({
-            'amount': [lambda x: x[x > 0].sum(), lambda x: abs(x[x < 0].sum())],
-            'fee': 'sum'
-        }).reindex(day_order).fillna(0)
-        summary.columns = ['Deposits', 'Withdrawals', 'Commissions']
-
-        table_rows = ""
-        for day, row in summary.iterrows():
-            bg_color = "#f9f9f9" if day in ['Saturday', 'Sunday'] else "#ffffff"
-            table_rows += f"""
-            <tr style="background-color: {bg_color}; border-bottom: 1px solid #eee;">
-                <td style="padding: 10px;"><b>{day}</b></td>
-                <td style="padding: 10px; text-align: right;">{row['Deposits']:,.2f}</td>
-                <td style="padding: 10px; text-align: right;">{row['Withdrawals']:,.2f}</td>
-                <td style="padding: 10px; text-align: right; color: #27ae60;">{row['Commissions']:,.2f}</td>
-            </tr>"""
-
-        total_vault = contributions_df['amount'].sum()
-        weekly_commissions = summary['Commissions'].sum()
-
-        html_content = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif; color: #333;">
-                <div style="background-color: #212529; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
-                    <h1 style="color: #FFD700; margin: 0;">RUCHANET WEEKLY SUMMARY</h1>
-                    <p style="color: #fff; margin: 5px 0 0 0;">Week: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b, %Y')}</p>
-                </div>
-                <div style="padding: 20px; border: 1px solid #ddd;">
-                    <h3>📈 Weekly Cash Flow</h3>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                        <thead style="background-color: #f2f2f2;">
-                            <tr>
-                                <th style="padding: 10px; text-align: left;">Day</th>
-                                <th style="padding: 10px; text-align: right;">Deposits (GHS)</th>
-                                <th style="padding: 10px; text-align: right;">Withdr. (GHS)</th>
-                                <th style="padding: 10px; text-align: right;">Comm. (GHS)</th>
-                            </tr>
-                        </thead>
-                        <tbody>{table_rows}</tbody>
-                    </table>
-                    <div style="margin-top: 25px; background: #f4f4f4; padding: 15px; border-radius: 5px;">
-                        <p style="margin: 5px 0;"><b>Total Weekly Commission:</b> GHS {weekly_commissions:,.2f}</p>
-                        <p style="margin: 5px 0; font-size: 18px; color: #2c3e50;"><b>Final Vault Balance: GHS {total_vault:,.2f}</b></p>
-                    </div>
-                    <p style="font-size: 12px; color: #888; margin-top: 20px;">Generated at: {now_dt.strftime('%Y-%m-%d %I:%M %p')}</p>
-                </div>
-            </body>
-        </html>
-        """
-
-        msg = EmailMessage()
-        msg['Subject'] = f"📊 {'AUTO' if not manual else 'MANUAL'} Report: {start_of_week.strftime('%d %b')}"
-        msg['From'] = st.secrets["emails"]["sender_email"]
-        msg['To'] = st.secrets["emails"]["receiver_email"]
-        msg.add_alternative(html_content, subtype='html')
-
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(st.secrets["emails"]["sender_email"], st.secrets["emails"]["app_password"])
-            server.send_message(msg)
-        return True
-    except Exception as e:
-        if manual: 
-            st.error(f"Error: {e}")
-        return False
 
 def get_next_gen_id(reg_date):
     # Format month and year: e.g., "03/26"
@@ -822,20 +739,23 @@ elif choice == "🛠 Admin Tools":
                         st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
-        st.subheader("📊 Weekly Executive Intelligence")
-        
-        # --- THE FIX: Convert 'date' column to datetime before processing ---
+     st.subheader("📊 Weekly Executive Intelligence")
+    
+    # 1. Prepare the data (Fixes the .dt error)
+    if not contributions.empty:
+        contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
+    
+    # 2. The Manual Button
+    if st.button("🚀 Force Send Comprehensive Weekly Report"):
         if not contributions.empty:
-            contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
-        
-        if st.button("🚀 Force Send Comprehensive Weekly Report"):
-            if not contributions.empty:
+            # This calls the function we moved to utils.py
+            with st.spinner("📧 Sending report now..."):
                 if send_weekly_report(contributions, manual=True):
-                    st.success(f"✅ Report sent successfully at {datetime.now().strftime('%I:%M %p')}!")
+                    st.success(f"✅ Manual Report Sent Successfully!")
                 else:
-                    st.error("Failed to send report. Please check your connection.")
-            else:
-                st.warning("No data available to generate a report.")
+                    st.error("❌ Failed to send. Check your Internet/Email settings.")
+        else:
+            st.warning("No data found to report on.")
         
         # Optional: Add a visual indicator if you have records
         if not contributions.empty:

@@ -823,9 +823,23 @@ elif choice == "🛠 Admin Tools":
 
     with t2:
         st.subheader("📊 Weekly Executive Intelligence")
+        
+        # --- THE FIX: Convert 'date' column to datetime before processing ---
+        if not contributions.empty:
+            contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
+        
         if st.button("🚀 Force Send Comprehensive Weekly Report"):
-            if send_weekly_report(contributions, manual=True):
-                st.success(f"✅ Report sent successfully at {datetime.now().strftime('%I:%M %p')}!")
+            if not contributions.empty:
+                if send_weekly_report(contributions, manual=True):
+                    st.success(f"✅ Report sent successfully at {datetime.now().strftime('%I:%M %p')}!")
+                else:
+                    st.error("Failed to send report. Please check your connection.")
+            else:
+                st.warning("No data available to generate a report.")
+        
+        # Optional: Add a visual indicator if you have records
+        if not contributions.empty:
+            st.info(f"System ready: {len(contributions)} records scanned for intelligence.")
 
     with t3:
         # 1. Health Check (Always at the top)

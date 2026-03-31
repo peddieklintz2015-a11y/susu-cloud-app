@@ -270,68 +270,39 @@ def get_next_gen_id(reg_date):
     
 # --- UPDATE SECURITY SECTION ---
 def check_password():
-    # 1. If no role is set, show the login screen
     if "role" not in st.session_state:
-        st.title("🔐 RUCHANET SYSTEM LOGIN")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            with st.form("agent_login"):
-                st.subheader("👤 Agent Login")
-                st.info("Access for field collectors. No password required.")
-                # Password-free entry for Agents
-                if st.form_submit_button("Access Collector Tools"):
-                    st.session_state["role"] = "Agent"
-                    st.rerun()
-        
-        with col2:
-            with st.form("admin_login"):
-                st.subheader("🛡️ Manager Login")
-                # This input will be checked against line 11 of your secrets.toml
-                pwd = st.text_input("Manager Password", type="password")
-                if st.form_submit_button("Verify Identity"):
-                    # Linked to 'login_password' (Line 11 in your screenshot)
-                    if pwd == st.secrets["passwords"]["login_password"]: 
-                        st.session_state["role"] = "Manager"
-                        st.rerun()
-                    else:
-                        st.error("Invalid Manager Password")
+        # ... (Your Login UI Code) ...
         return False
     
-    # 2. Show the switch/logout option once logged in
+    # Show logout in sidebar
     st.sidebar.markdown(f"**Current User: {st.session_state['role']}**")
     if st.sidebar.button("Logout / Switch User"):
         del st.session_state["role"]
         st.rerun()
-        
-    return True
-    
-    # --- ADDED: LOGOUT / SWITCH USER FUNCTIONALITY ---
-    # This adds a button to the sidebar to clear the session
-    st.sidebar.markdown(f"*Logged in as: {st.session_state['role']}*")
-    if st.sidebar.button("Logout / Switch User"):
-        del st.session_state["role"]
-        st.rerun()
-        
     return True
 
-# Run the security check
+# --- THE ONLY GATEKEEPER ---
 if check_password():
-    # Adjust menu based on role
-    if st.session_state.get("role") == "Manager":
+    # ALL application logic must stay inside this IF block
+    role = st.session_state.get("role")
+    
+    if role == "Manager":
         menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
     else:
         menu = ["💸 Transactions", "📑 Digital Passbook"]
 
-    # Display the navigation
-    st.sidebar.selectbox("Navigation", menu)
-    st.write(f"Welcome to the {st.session_state['role']} interface.")
+    # Now define your 'selection' and show the pages
+    selection = st.sidebar.selectbox("Navigation", menu)
+    
+    if selection == "📑 Digital Passbook":
+        # INSERT YOUR PASSBOOK CODE HERE (Indented!)
+        st.write("This is the Passbook.")
+        
+    elif selection == "💸 Transactions":
+        # INSERT YOUR WITHDRAWAL CODE HERE (Indented!)
+        st.write("This is the Transaction page.")
 
-# --- DYNAMIC MENU BASED ON ROLE ---
-if st.session_state.get("role") == "Manager":
-    menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
-else:
-    menu = ["💸 Transactions", "📑 Digital Passbook"]
+# --- DO NOT PUT ANY CODE DOWN HERE --
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()

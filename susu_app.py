@@ -520,41 +520,43 @@ elif choice == "💸 Transactions":
                 else:
                     st.error("🚫 Only a Manager can authorize withdrawals under 31 marks.")
                     st.stop()
-
             # 5. CASH & MARKS VALIDATION
-            if requested_cash > 0 or is_migration:
-                if not is_migration:
-                    if total_marks_saved < abs(db_marks):
-                        st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
-                        st.stop()
-                    elif total_deduction > (total_saved_ghs + 0.01):
-                        st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
-                        st.stop()
-                    else:
-                        db_amt = -float(requested_cash)
-                        st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
+        if requested_cash > 0 or is_migration:
+            if not is_migration:
+                if total_marks_saved < abs(db_marks):
+                    st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
+                    st.stop()
+                elif total_deduction > (total_saved_ghs + 0.01):
+                    st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
+                    st.stop()
                 else:
-                    db_amt = -float(requested_cash)
-            
-        # --- 6. THE SYNC BUTTON (Safely isolated) ---
-        # The code only gets here if none of the st.stop() commands were triggered.
-        if st.button("🚀 Confirm & Sync Transaction"):
-            new_entry = {
-                'amount': float(db_amt),
-                'client_name': target,
-                'date': trans_date.isoformat(),
-                'fee': float(db_fee),
-                'marks_covered': int(db_marks)
-            }
-
-            if sync_data_dual(new_entry):
-                st.cache_data.clear() 
-                st.success(f"✅ Transaction Synced for {target}!")
-                st.balloons()
-                time.sleep(1)
-                st.rerun()
+                    # The fix is applied here:
+                    db_amt = -float(total_deduction)
+                    st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
             else:
-                st.error("❌ Sync failed. Check internet.")
+                # Migration logic
+                db_amt = -(float(requested_cash) + float(db_fee))
+            
+            # --- 6. THE SYNC BUTTON (Fixed Logic) ---
+            if st.button("🚀 Confirm & Sync Transaction"):
+    
+            # We combine the requested cash and the fee for the 'amount' field
+            # This ensures the client's balance is reduced by the FULL amount
+             total_to_subtract = float(requested_cash + db_fee)
+    
+            new_entry = {
+            'amount': -total_to_subtract, # Negative because it's a deduction
+            'client_name': target,
+            'date': trans_date.isoformat(),
+            'fee': float(db_fee),         # Keeps a record of the fee specifically
+            'marks_covered': int(db_marks)}
+
+    if sync_data_dual(new_entry):
+        st.cache_data.clear() 
+        st.success(f"✅ Transaction Synced! GHS {total_to_subtract:,.2f} deducted from balance.")
+        st.balloons()
+        time.sleep(1.5)
+        st.rerun()
     else:
         st.warning("Please register clients in Admin Tools first.")                 
 
@@ -748,7 +750,7 @@ elif choice == "🛠 Admin Tools":
             # This calls the function we moved to utils.py
             with st.spinner("📧 Sending report now..."):
                 if send_weekly_report(contributions, manual=True):
-                    st.success(f"✅ Manual Report Sent Successfully!")
+                    st.success("✅ Manual Report Sent Successfully!")
                 else:
                     st.error("❌ Failed to send. Check your Internet/Email settings.")
         else:

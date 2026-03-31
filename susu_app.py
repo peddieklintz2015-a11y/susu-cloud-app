@@ -281,7 +281,7 @@ def check_password():
         st.rerun()
     return True
 
-# --- THE ONLY GATEKEEPER ---
+ # --- THE ONLY GATEKEEPER ---
 if check_password():
     # ALL application logic must stay inside this IF block
     role = st.session_state.get("role")
@@ -301,8 +301,6 @@ if check_password():
     elif selection == "💸 Transactions":
         # INSERT YOUR WITHDRAWAL CODE HERE (Indented!)
         st.write("This is the Transaction page.")
-
-# --- DO NOT PUT ANY CODE DOWN HERE --
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()

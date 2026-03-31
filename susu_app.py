@@ -445,16 +445,12 @@ elif choice == "💸 Transactions":
             total_saved_ghs = 0.0
             total_marks_saved = 0
         
-        # --- PROGRESS TRACKER (FIXED SPECIFICITY) ---
+        # --- PROGRESS TRACKER ---
         try:
-            # Calculate marks for the current 31-day cycle
             current_cycle_marks = int(total_marks_saved % 31)
-            # Calculate progress percentage
             progress_val = current_cycle_marks / 31.0
-            # Ensure the value stays between 0.0 and 1.0 for Streamlit
             safe_progress = float(max(0.0, min(progress_val, 1.0)))
         except (ZeroDivisionError, TypeError, ValueError):
-            # If data is missing or invalid, default to 0
             current_cycle_marks = 0
             safe_progress = 0.0
         
@@ -467,6 +463,11 @@ elif choice == "💸 Transactions":
         # --- 2. TRANSACTION INPUTS ---
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
         
+        # INITIALIZE VARIABLES (Fixes the NameError)
+        requested_cash = 0.0
+        db_amt, db_marks, db_fee = 0.0, 0, 0.0
+        can_proceed = True
+
         # Migration / Backdating Logic
         if is_migration:
             selected_date = st.date_input("Transaction Date", value=datetime.now().date())
@@ -475,88 +476,78 @@ elif choice == "💸 Transactions":
         else:
             trans_date = datetime.now()
 
-        can_save = True
-        db_amt, db_marks, db_fee = 0.0, 0, 0.0
-
         if ttype == "Deposit":
             num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
             db_marks = int(num_marks) 
             st.info(f"➕ **Deposit:** GHS {db_amt:,.2f} | 📈 **Marks:** +{num_marks}")
             
-        else: # --- Withdrawal Logic with math.ceil and Hard Locks ---
+        else: # --- Withdrawal Logic ---
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
             
             if is_migration:
                 db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
-                db_marks = st.number_input("Marks to Deduct (Enter as negative, e.g. -31)", value=0, step=1)
+                db_marks = st.number_input("Marks to Deduct (Negative)", value=0, step=1)
             else:
                 db_fee = float(d_mark)
                 if d_mark > 0:
-                    # 1. THE MULTIPLE CHECK: Hard lock if amount isn't divisible by the Daily Mark
                     if requested_cash % d_mark != 0:
-                        st.error(f"🚫 Invalid Amount! Withdrawal must be a multiple of the Daily Mark (GHS {d_mark}).")
-                        st.stop() # This prevents the script from reaching the Sync button below
+                        st.error(f"🚫 Invalid Amount! Must be a multiple of GHS {d_mark}.")
+                        st.stop()
                     
-                    # 2. THE MATH CEIL: Ensures 'math' import is used and rounding is correct
-                    # We use math.ceil to ensure any fractional division rounds UP to the next mark
                     marks_to_remove = math.ceil(requested_cash / d_mark) + 1
                     db_marks = -int(marks_to_remove)
                 else:
                     db_marks = 0
 
-            # 3. DEFINE TOTAL DEDUCTION
+            # CALCULATE TOTAL DEDUCTION (Cash + Commission)
             total_deduction = requested_cash + db_fee
 
-            # 4. UNIVERSAL MANAGER OVERRIDE GATE (The 31-mark rule)
+            # Manager Override Logic
             if abs(db_marks) < 31:
-                st.warning(f"⚠️ Transaction involves only {abs(db_marks)} marks (Minimum 31 required).")
-                
+                st.warning(f"⚠️ Transaction involves only {abs(db_marks)} marks.")
                 if st.session_state.get("role") == "Manager":
-                    override = st.checkbox("🔓 Authorize Emergency Withdrawal (Manager Only)")
+                    override = st.checkbox("🔓 Authorize Emergency Withdrawal")
                     if not override:
-                        st.info("Please check the box above to enable the Sync button.")
                         st.stop()
                 else:
                     st.error("🚫 Only a Manager can authorize withdrawals under 31 marks.")
                     st.stop()
-            # 5. CASH & MARKS VALIDATION
-        if requested_cash > 0 or is_migration:
-            if not is_migration:
-                if total_marks_saved < abs(db_marks):
-                    st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
-                    st.stop()
-                elif total_deduction > (total_saved_ghs + 0.01):
-                    st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
-                    st.stop()
-                else:
-                    # The fix is applied here:
-                    db_amt = -float(total_deduction)
-                    st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
-            else:
-                # Migration logic
-                db_amt = -(float(requested_cash) + float(db_fee))
-            
-            # --- 6. THE SYNC BUTTON (Fixed Logic) ---
-            if st.button("🚀 Confirm & Sync Transaction"):
-    
-            # We combine the requested cash and the fee for the 'amount' field
-            # This ensures the client's balance is reduced by the FULL amount
-             total_to_subtract = float(requested_cash + db_fee)
-    
-            new_entry = {
-            'amount': -total_to_subtract, # Negative because it's a deduction
-            'client_name': target,
-            'date': trans_date.isoformat(),
-            'fee': float(db_fee),         # Keeps a record of the fee specifically
-            'marks_covered': int(db_marks)}
 
-    if sync_data_dual(new_entry):
-        st.cache_data.clear() 
-        st.success(f"✅ Transaction Synced! GHS {total_to_subtract:,.2f} deducted from balance.")
-        st.balloons()
-        time.sleep(1.5)
-        st.rerun()
+            # --- 5. CASH & MARKS VALIDATION ---
+            if requested_cash > 0 or is_migration:
+                if not is_migration:
+                    if total_marks_saved < abs(db_marks):
+                        st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}")
+                        st.stop()
+                    elif total_deduction > (total_saved_ghs + 0.01):
+                        st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
+                        st.stop()
+                    else:
+                        # FIX: Subtract BOTH the cash and the fee from the amount field
+                        db_amt = -float(total_deduction)
+                        st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} (Cash: {requested_cash} + Fee: {db_fee})")
+                else:
+                    db_amt = -float(requested_cash + db_fee)
+            
+        # --- 6. THE SYNC BUTTON ---
+        if st.button("🚀 Confirm & Sync Transaction"):
+            new_entry = {
+                'amount': float(db_amt),
+                'client_name': target,
+                'date': trans_date.isoformat(),
+                'fee': float(db_fee),
+                'marks_covered': int(db_marks)
+            }
+
+            if sync_data_dual(new_entry):
+                st.cache_data.clear() 
+                st.success(f"✅ Transaction Synced for {target}!")
+                st.balloons()
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error("❌ Sync failed. Check internet.")
     else:
         st.warning("Please register clients in Admin Tools first.")                 
 

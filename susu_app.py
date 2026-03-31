@@ -268,24 +268,6 @@ def get_next_gen_id(reg_date):
         st.error(f"⚠️ ID Generation Error: {e}") 
         # Fallback to 001 if something goes wrong
         return f"001/{mm_yy}"
-    
-# --- 4. SECURITY ---
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
-        with st.form("login_form"):
-            st.text_input("Admin Password", type="password", key="login_input")
-            if st.form_submit_button("Log In"):
-                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
-                    st.session_state["password_correct"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid Login Password")
-        return False
-    return True
-
-if not check_password():
-    st.stop()
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()
@@ -382,6 +364,24 @@ with st.sidebar:
         st.info("Android: Tap ⋮ and 'Install'. \niOS: Tap Share and 'Add to Home Screen'.")
     
     st.divider()
+
+# --- 4. SECURITY ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
+        with st.form("login_form"):
+            st.text_input("Admin Password", type="password", key="login_input")
+            if st.form_submit_button("Log In"):
+                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid Login Password")
+        return False
+    return True
+
+if not check_password():
+    st.stop()
 
 if choice == "📊 Dashboard":
     # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---

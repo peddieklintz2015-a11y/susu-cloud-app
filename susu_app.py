@@ -27,27 +27,59 @@ def sync_data_dual(new_record):
     """Writes to Local SQLite and Cloud PostgreSQL simultaneously."""
     success_local = False
     success_cloud = False
+    
+    # --- LOCAL SQLITE SYNC ---
     try:
         conn_local = sqlite3.connect('susu_data.db')
+        
+        # 1. Create table if it doesn't exist at all
         conn_local.execute("""
             CREATE TABLE IF NOT EXISTS contributions 
-            (client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
+            (client_id TEXT, client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
         """)
+        
+        # 2. PRO FIX: Instead of a bare except, we check for the specific SQLite error
+        try:
+            conn_local.execute("ALTER TABLE contributions ADD COLUMN client_id TEXT")
+        except sqlite3.OperationalError:
+            # This specific error means the column already exists, so we just skip it
+            pass
+            
         local_df = pd.DataFrame([new_record])
-        if 'id' in local_df.columns:
-            local_df = local_df.drop(columns=['id'])
         local_df.to_sql('contributions', conn_local, if_exists='append', index=False)
         conn_local.close()
         success_local = True
     except Exception as e:
         st.error(f"Local Save Error: {e}")
 
+    # --- CLOUD POSTGRES SYNC ---
     try:
         with conn.session as s:
             s.execute(text("""
-                INSERT INTO contributions (client_name, amount, date, marks_covered, fee)
-                VALUES (:cn, :am, :dt, :mk, :fe)
+                INSERT INTO contributions (client_id, client_name, amount, date, marks_covered, fee)
+                VALUES (:ci, :cn, :am, :dt, :mk, :fe)
             """), {
+                "ci": new_record.get('client_id', 'N/A'),
+                "cn": new_record['client_name'],
+                "am": float(new_record['amount']),
+                "dt": new_record['date'],
+                "mk": int(new_record['marks_covered']),
+                "fe": float(new_record['fee'])
+            })
+            s.commit()
+        success_cloud = True
+    except Exception as e:
+        st.error(f"Cloud Sync Error: {e}")
+        
+    return success_local and success_cloud
+
+    try:
+        with conn.session as s:
+            s.execute(text("""
+                INSERT INTO contributions (client_id, client_name, amount, date, marks_covered, fee)
+                VALUES (:ci, :cn, :am, :dt, :mk, :fe)
+            """), {
+                "ci": new_record.get('client_id', 'N/A'),
                 "cn": new_record['client_name'],
                 "am": float(new_record['amount']),
                 "dt": new_record['date'],
@@ -421,110 +453,103 @@ elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
     if not clients.empty:
-        # 1. Selection UI
         col_search, col_mode = st.columns([2, 1])
         with col_search:
-            client_list = clients['client_name'].tolist()
-            target = st.selectbox("Select Client", client_list)
+            target = st.selectbox("Select Client", clients['client_name'].tolist())
         with col_mode:
-            is_migration = st.checkbox("📂 Migration Mode", help="Use for backdating or manual adjustments.")
+            is_migration = st.checkbox("📂 Migration Mode")
 
-        client_row = clients[clients['client_name'] == target].iloc[0]
-        d_mark = float(client_row.get('daily_mark', 0.0))
-        c_id = client_row.get('client_id', 'N/A')
+        c_info = clients[clients['client_name'] == target].iloc[0]
+        d_mark = float(c_info.get('daily_mark', 0.0))
+        c_id = c_info.get('client_id', 'N/A')
         
-        # --- DATA RETRIEVAL ---
-        user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
-        total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
-        total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
+        # Data calculations
+        u_hist = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
+        total_bal = float(u_hist['amount'].sum()) if not u_hist.empty else 0.0
+        total_mks = int(u_hist['marks_covered'].sum()) if not u_hist.empty else 0
         
-        st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
+        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {total_bal:,.2f} | 📅 *Marks:* {total_mks}")
         st.divider()
 
-        # --- 2. INPUTS ---
-        ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
+        ttype = st.radio("Action", ["Deposit", "Withdrawal"], horizontal=True)
         
-        # Initialize variables to prevent NameErrors
-        requested_cash = 0.0
-        db_amt, db_marks, db_fee = 0.0, 0, 0.0
+        # FIX: Define variables at top level to avoid NameError
+        req_cash, db_amt, db_mks, db_fee = 0.0, 0.0, 0, 0.0
 
         if ttype == "Deposit":
-            num_marks = st.number_input("Marks to add", min_value=1, step=1)
-            db_amt = float(num_marks * d_mark)
-            db_marks = int(num_marks)
-            st.info(f"➕ **Deposit:** GHS {db_amt:,.2f} | 📈 **Marks:** +{num_marks}")
+            num_mks = st.number_input("Marks to add", min_value=1, step=1)
+            db_amt = float(num_mks * d_mark)
+            db_mks = int(num_mks)
+            st.info(f"➕ *Deposit:* GHS {db_amt:,.2f}")
+        else:
+            w_method = st.selectbox("Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission)"])
             
-        else: # --- WITHDRAWAL LOGIC (With Max Cash Helper) ---
-            w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
-            
-            # --- HELPER: CALCULATE MAX CASH ---
+            # Max Cash Helper
             if d_mark > 0:
                 if w_method == "Full Payout (Include Commission)":
-                    # Formula: For every 31 marks, 1 is reserved for commission.
-                    # We estimate how many cycles of 32 (31+1) exist in their total.
-                    est_commissions = math.ceil(total_marks_saved / 32)
-                    max_cash_marks = max(0, total_marks_saved - est_commissions)
-                    max_cash_allowed = float(max_cash_marks * d_mark)
-                    st.success(f"💡 **Suggested Max Cash (After Commission):** GHS {max_cash_allowed:,.2f}")
+                    est_fee_mks = math.ceil(total_mks / 32)
+                    max_c = float((total_mks - est_fee_mks) * d_mark)
+                    st.success(f"💡 *Suggested Max Payout:* GHS {max_c:,.2f}")
                 else:
-                    # Advance payments can technically take all available cash, 
-                    # but suggest the current balance.
-                    st.info(f"💡 **Current Balance Available:** GHS {total_saved_ghs:,.2f}")
+                    st.info(f"💡 *Available Balance:* GHS {total_bal:,.2f}")
 
-            requested_cash = st.number_input("Cash Amount to Withdraw (GHS)", min_value=0.0, step=d_mark)
+            req_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
             
             if d_mark > 0:
-                # Calculate how many marks the requested cash represents
-                marks_for_cash = int(requested_cash / d_mark)
-                
+                mks_for_cash = int(req_cash / d_mark)
                 if w_method == "Full Payout (Include Commission)":
-                    # TIERED COMMISSION: 1-31 marks = 1 mark fee, 32-62 marks = 2 marks fee
-                    num_commissions = math.ceil(marks_for_cash / 31)
-                    db_fee = float(num_commissions * d_mark)
-                    db_marks = -(marks_for_cash + num_commissions)
+                    num_comm = math.ceil(mks_for_cash / 31)
+                    db_fee = float(num_comm * d_mark)
+                    db_mks = -(mks_for_cash + num_comm)
                 else:
-                    # ADVANCE PAYMENT: Deduct marks for cash only. Fee is 0.
                     db_fee = 0.0
-                    db_marks = -marks_for_cash
+                    db_mks = -mks_for_cash
                 
-                total_deduction = requested_cash + db_fee
-                db_amt = -float(total_deduction)
+                db_amt = -float(req_cash + db_fee)
 
-                # Validation logic to prevent balance/commission cheating
-                if requested_cash > 0:
-                    if total_marks_saved < abs(db_marks):
-                        st.error(f"🚫 Insufficient Marks! Needed (Cash + Fee): {abs(db_marks)}, Have: {total_marks_saved}")
-                        st.stop()
-                    if total_deduction > (total_saved_ghs + 0.01):
-                        st.error("⚠️ Insufficient Balance to cover both Cash and Commission Fee.")
-                        st.stop()
-                    
-                    st.warning(f"📉 **Total Deduction:** GHS {total_deduction:,.2f} (Cash: {requested_cash} + Fee: {db_fee})")
+            # --- VALIDATION (SAFE FROM NAMEERROR) ---
+            if req_cash > 0 or is_migration:
+                if total_mks < abs(db_mks):
+                    st.error("🚫 Insufficient Marks.")
+                    st.stop()
+                if abs(db_amt) > (total_bal + 0.01) and not is_migration:
+                    st.error("⚠️ Insufficient Balance.")
+                    st.stop()
 
-        # --- 3. SYNC BUTTON ---
-        if st.button("🚀 Confirm & Sync Transaction"):
-            # Ensure we don't sync 0.0 transactions unless it's a migration
-            if db_amt == 0 and not is_migration:
-                st.error("Please enter a valid transaction amount.")
-            else:
-                new_entry = {
-                    'amount': float(db_amt),
-                    'client_name': target,
-                    'date': datetime.now().isoformat(),
-                    'fee': float(db_fee),
-                    'marks_covered': int(db_marks)
-                }
-
-                if sync_data_dual(new_entry):
-                    st.cache_data.clear() 
-                    st.success(f"✅ Transaction Synced Successfully for {target}!")
-                    st.balloons()
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Sync failed. Please check your connection.")
+        if st.button("🚀 Confirm & Sync"):
+            new_record = {
+                'client_id': c_id,
+                'client_name': target,
+                'amount': db_amt,
+                'date': datetime.now().isoformat(),
+                'fee': db_fee,
+                'marks_covered': db_mks
+            }
+            if sync_data_dual(new_record):
+                st.success("✅ Synced!")
+                # Thermal Receipt logic
+                receipt = f"""
+                <div style="font-family:monospace; border:1px solid #000; padding:10px; width:250px; background:white; color:black;">
+                    <center><h4>RUCHANET SUSU</h4></center>
+                    <hr>
+                    <b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
+                    <b>Client:</b> {target}<br>
+                    <b>ID:</b> {c_id}<br>
+                    -----------------------<br>
+                    <b>Amount:</b> GHS {abs(db_amt):,.2f}<br>
+                    <b>Fee:</b> GHS {db_fee:,.2f}<br>
+                    <b>Marks:</b> {db_mks}<br>
+                    -----------------------<br>
+                    <center><p style="font-size:10px;">Thank you!</p></center>
+                </div>
+                <button onclick="window.print()" style="width:100%; padding:10px; background:#FFD700; border:none; margin-top:5px; cursor:pointer;">🖨️ Print Receipt</button>
+                """
+                components.html(receipt, height=350)
+                st.balloons()
+                time.sleep(1)
+                # Removed st.rerun() so receipt stays visible to print
     else:
-        st.warning("Please register clients in Admin Tools first.")                 
+        st.warning("Register clients first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")

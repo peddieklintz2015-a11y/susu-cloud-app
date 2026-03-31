@@ -342,7 +342,7 @@ if now.weekday() == 6 and now.hour >= 8:
 # --- SIDEBAR (NAVIGATION FIRST) ---
 with st.sidebar:
     st.title("📱 App Options")
-    
+
     # Combined Install Guide
     if st.checkbox("Show Install Guide"):
         st.info("""

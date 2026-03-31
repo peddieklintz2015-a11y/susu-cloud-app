@@ -342,19 +342,19 @@ if now.weekday() == 6 and now.hour >= 8:
 # --- SIDEBAR (NAVIGATION FIRST) ---
 with st.sidebar:
     st.title("📱 App Options")
+    
+    # 1. NAVIGATION FIRST (Now at the very top)
+    choice = st.selectbox("Go To:", menu)
+    
+    st.divider()
 
-    # Combined Install Guide
+    # 2. COMBINED INSTALL GUIDE
     if st.checkbox("Show Install Guide"):
         st.info("""
         To Install on Phone:
         * Android: Tap ⋮ and 'Install App'.
         * iOS: Tap Share 📤 and 'Add to Home Screen'.
         """)
-    
-    st.divider()
-    
-    # 1. NAVIGATION AT THE TOP
-    choice = st.selectbox("Go To:", menu)
     
     st.divider()
     # --- NETWORK & SCHEMA HEALTH CHECK ---

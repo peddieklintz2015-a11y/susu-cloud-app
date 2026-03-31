@@ -192,9 +192,6 @@ with st.sidebar:
         menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
     else:
         menu = ["💸 Transactions", "📑 Digital Passbook"]
-
-    # Use a unique key to fix the Red Error in your photo
-    choice = st.selectbox("Go To:", menu, key="main_navigation")
     
 def draw_sidebar_log(df):
         st.divider()

@@ -532,6 +532,7 @@ elif choice == "📑 Digital Passbook":
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if not clients.empty:
+        # Filter based on search input
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
         
         if not filtered.empty:
@@ -544,13 +545,12 @@ elif choice == "📑 Digital Passbook":
                 user_history = contributions[contributions['client_name'] == target].copy()
                 total_marks = int(user_history['marks_covered'].sum())
                 current_balance = float(user_history['amount'].sum())
-                # Sort to show newest first
                 user_history = user_history.sort_values(by='date', ascending=False)
             else:
                 total_marks = 0
                 current_balance = 0.0
             
-            # --- UI PROFILE ---
+            # --- UI PROFILE DISPLAY ---
             col_a, col_b = st.columns([1, 2])
             with col_a:
                 photo = c_info.get('photo_url')
@@ -559,18 +559,21 @@ elif choice == "📑 Digital Passbook":
             
             with col_b:
                 st.subheader(f"User: {target}")
-                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')} | 🏷️ **Rate:** GHS {c_info.get('daily_mark', 0.0):,.2f}")
-                m1, m2 = st.columns(2)
+                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
+                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
+                
+                # METRICS ROW: Including the missing Daily Rate
+                m1, m2, m3 = st.columns(3)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Total Marks", f"{total_marks}")
+                m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
 
             st.divider()
             
             # --- TRANSACTION HISTORY & RECEIPT GENERATOR ---
-            st.subheader("📜 Transaction History")
+            st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    # Create a clean display for each transaction row
                     t_date = pd.to_datetime(row['date']).strftime('%Y-%m-%d %H:%M')
                     t_amt = float(row['amount'])
                     t_type = "Deposit" if t_amt > 0 else "Withdrawal"
@@ -581,21 +584,22 @@ elif choice == "📑 Digital Passbook":
                         with col_text:
                             st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
-                            st.write(f"**Fee:** GHS {row.get('fee', 0.0):,.2f}")
+                            st.write(f"**Commission/Fee:** GHS {row.get('fee', 0.0):,.2f}")
 
                         with col_print:
-                            # THE THERMAL RECEIPT COMPONENT
+                            # THERMAL RECEIPT (Includes Daily Rate for transparency)
                             receipt_html = f"""
                             <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 10px; background: white; color: black; border: 1px solid #000;">
                                 <center>
                                     <h4 style="margin:0;">RUCHANET DAILY SUSU</h4>
-                                    <p style="font-size:10px;">Digital Passbook Copy</p>
+                                    <p style="font-size:10px;">Transaction Record</p>
                                 </center>
                                 <hr>
                                 <p style="font-size:12px;">
                                     <b>Date:</b> {t_date}<br>
                                     <b>Client:</b> {target}<br>
                                     <b>ID:</b> {c_info.get('client_id')}<br>
+                                    <b>Daily Rate:</b> GHS {c_info.get('daily_mark', 0.0):,.2f}<br>
                                     <b>Type:</b> {t_type}<br>
                                     ----------------------------<br>
                                     <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
@@ -605,22 +609,22 @@ elif choice == "📑 Digital Passbook":
                                     <b>Verified Digital Record</b>
                                 </p>
                             </div>
-                            <button onclick="printReceipt('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+                            <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
                             
                             <script>
-                            function printReceipt(divId) {{
-                                var content = document.getElementById(divId).innerHTML;
-                                var myWindow = window.open('', '', 'width=350,height=600');
-                                myWindow.document.write('<html><head><title>Print Receipt</title></head><body style="margin:0;padding:20px;">');
-                                myWindow.document.write(content);
-                                myWindow.document.write('</body></html>');
-                                myWindow.document.close();
-                                myWindow.focus();
-                                setTimeout(function(){{ myWindow.print(); myWindow.close(); }}, 250);
+                            function printDiv(divId) {{
+                                var printContents = document.getElementById(divId).innerHTML;
+                                var originalContents = document.body.innerHTML;
+                                var printWindow = window.open('', '', 'height=500,width=400');
+                                printWindow.document.write('<html><head><title>Print Receipt</title></head><body>');
+                                printWindow.document.write(printContents);
+                                printWindow.document.write('</body></html>');
+                                printWindow.document.close();
+                                printWindow.print();
                             }}
                             </script>
                             """
-                            components.html(receipt_html, height=350)
+                            components.html(receipt_html, height=380)
             else:
                 st.info("No transaction history found.")
         else:

@@ -270,21 +270,39 @@ def get_next_gen_id(reg_date):
     
 # --- 4. SECURITY ---
 def check_password():
-    if "password_correct" not in st.session_state:
-        st.title("🔐 RUCHANET SUSU ADMIN LOGIN")
-        with st.form("login_form"):
-            st.text_input("Admin Password", type="password", key="login_input")
-            if st.form_submit_button("Log In"):
-                if st.session_state["login_input"] == st.secrets["passwords"]["login_password"]:
-                    st.session_state["password_correct"] = True
+    if "role" not in st.session_state:
+        st.title("🔐 RUCHANET SYSTEM LOGIN")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            with st.form("agent_login"):
+                st.subheader("👤 Agent Access")
+                st.write("For daily collections and passbook viewing.")
+                if st.form_submit_button("Enter as Agent"):
+                    st.session_state["role"] = "Agent"
                     st.rerun()
-                else:
-                    st.error("❌ Invalid Login Password")
+        
+        with col2:
+            with st.form("admin_login"):
+                st.subheader("🛡️ Manager Access")
+                pwd = st.text_input("Manager Password", type="password")
+                if st.form_submit_button("Verify Identity"):
+                    if pwd == st.secrets["passwords"]["login_password"]:
+                        st.session_state["role"] = "Manager"
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid Manager Password")
         return False
     return True
 
 if not check_password():
     st.stop()
+
+# --- DYNAMIC MENU BASED ON ROLE ---
+if st.session_state.get("role") == "Manager":
+    menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+else:
+    menu = ["💸 Transactions", "📑 Digital Passbook"]
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()
@@ -348,7 +366,7 @@ with st.sidebar:
     st.divider()
 
     # 2. COMBINED INSTALL GUIDE (Only ONE instance here to prevent errors)
-    if st.checkbox("Show Install Guide"):
+    if st.checkbox("Show Install Guide", key="unique_install_check_123"):
         st.info("""
         **To Install on Phone:**
         * *Android:* Tap ⋮ and 'Install App'.
@@ -451,17 +469,42 @@ if choice == "📊 Dashboard":
         m3.metric("📈 Commissions", "GHS 0.00")
         m4.metric("📉 Net Liability", "GHS 0.00")
         st.info("💡 Start recording transactions to see financial data.")
+        # --- 3.5 MATURITY & PAYOUT ALERTS ---
+    st.divider()
+    st.subheader("🎯 Payout Readiness (31+ Marks)")
+    
+    if not contributions.empty:
+        # Calculate total marks per client
+        marks_summary = contributions.groupby('client_name')['marks_covered'].sum().reset_index()
+        # Identify clients ready for payout (Multiples of 31)
+        ready_clients = marks_summary[marks_summary['marks_covered'] >= 31]
+        
+        if not ready_clients.empty:
+            for _, row in ready_clients.iterrows():
+                cycles = int(row['marks_covered'] // 31)
+                st.success(f"🌟 *{row['client_name']}* has completed *{cycles} cycle(s)* ({row['marks_covered']} total marks).")
+        else:
+            st.info("No clients have reached the 31-mark maturity goal yet.")
+    else:
+        st.info("No transaction data available to calculate maturity.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
     if not clients.empty:
-        # 1. Select Client
-        client_list = clients['client_name'].tolist()
-        target = st.selectbox("Select Client", client_list)
+        # 1. Select Client & Migration Toggle
+        col_search, col_mode = st.columns([2, 1])
+        with col_search:
+            client_list = clients['client_name'].tolist()
+            target = st.selectbox("Select Client", client_list)
         
+        with col_mode:
+            is_migration = st.checkbox("📂 Migration Mode", help="Use this to backdate or record old physical passbook data.")
+
+        # Get Client Metadata
         client_row = clients[clients['client_name'] == target].iloc[0]
-        d_mark = float(client_row['daily_mark'])
+        d_mark = float(client_row.get('daily_mark', 0.0))
+        c_id = client_row.get('client_id', 'N/A')
         
         # --- DATA RETRIEVAL ---
         if not contributions.empty and 'client_name' in contributions.columns:
@@ -473,16 +516,20 @@ elif choice == "💸 Transactions":
             total_saved_ghs = 0.0
             total_marks_saved = 0
         
-        # --- PROGRESS TRACKER (FIXED EXCEPTIONS) ---
+        # --- PROGRESS TRACKER (FIXED SPECIFICITY) ---
         try:
-            current_cycle_marks = float(total_marks_saved % 31)
+            # Calculate marks for the current 31-day cycle
+            current_cycle_marks = int(total_marks_saved % 31)
+            # Calculate progress percentage
             progress_val = current_cycle_marks / 31.0
+            # Ensure the value stays between 0.0 and 1.0 for Streamlit
             safe_progress = float(max(0.0, min(progress_val, 1.0)))
         except (ZeroDivisionError, TypeError, ValueError):
-            current_cycle_marks = 0.0
+            # If data is missing or invalid, default to 0
+            current_cycle_marks = 0
             safe_progress = 0.0
         
-        st.write(f"📊 *Current Month Progress:* **{int(current_cycle_marks)}/31** Marks")
+        st.write(f"🆔 **ID:** {c_id} | 📊 *Cycle:* **{current_cycle_marks}/31** Marks")
         st.progress(safe_progress)
         st.write(f"💰 **Total Balance:** GHS {total_saved_ghs:,.2f}")
 
@@ -491,11 +538,11 @@ elif choice == "💸 Transactions":
         # --- 2. TRANSACTION INPUTS ---
         ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
         
-        # BACKDATING / MIGRATION LOGIC
-        is_migration = st.checkbox("Migrate Old Data (Backdate)")
+        # Migration / Backdating Logic
         if is_migration:
-            selected_date = st.date_input("Select Transaction Date", value=datetime.now().date())
+            selected_date = st.date_input("Transaction Date", value=datetime.now().date())
             trans_date = datetime.combine(selected_date, datetime.now().time())
+            st.warning(f"⚠️ Recording as Migration for Date: {selected_date}")
         else:
             trans_date = datetime.now()
 
@@ -505,66 +552,74 @@ elif choice == "💸 Transactions":
         if ttype == "Deposit":
             num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
-            db_marks = num_marks # Positive marks for deposit
-            st.info(f"💰 Value: GHS {db_amt:,.2f} | 📈 Marks: +{num_marks}")
+            db_marks = int(num_marks) 
+            st.info(f"➕ **Deposit:** GHS {db_amt:,.2f} | 📈 **Marks:** +{num_marks}")
             
-        else: # --- Withdrawal logic --- #
+        else: # --- Withdrawal Logic with math.ceil ---
             requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
+            
             if is_migration:
                 db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
+                db_marks = st.number_input("Marks to Deduct (Enter as negative, e.g. -31)", value=0, step=1)
             else:
-                months_count = math.ceil(total_marks_saved / 31) if total_marks_saved > 0 else 1
-                db_fee = float(months_count * d_mark)
-            
-            total_deduction = requested_cash + db_fee
-            
-            # AMENDMENT: Calculate marks to remove based on cash taken
-            # If they take 100 GHS and a mark is 10 GHS, we must subtract 10 marks.
-            # We also subtract the 'fee' mark.
-            if d_mark > 0:
-                marks_to_remove = math.ceil(total_deduction / d_mark)
-                db_marks = -int(marks_to_remove) # Negative marks for withdrawal
-            else:
-                db_marks = 0
-
-            if requested_cash > 0:
-                if total_deduction > (total_saved_ghs + 0.01):
-                    st.error(f"⚠️ Insufficient Balance! (Available: GHS {total_saved_ghs:,.2f})")
-                    can_save = False
+                # YOUR ORIGINAL LOGIC RE-INSTATED:
+                # 1. Determine Fee (1 mark)
+                db_fee = float(d_mark)
+                
+                # 2. Calculate marks to remove using math.ceil
+                if d_mark > 0:
+                    # Cash / Mark rate, rounded up, plus the 1 commission mark
+                    marks_to_remove = math.ceil(requested_cash / d_mark) + 1
+                    db_marks = -int(marks_to_remove)
                 else:
-                    db_amt = -float(total_deduction)
-                    st.warning(f"Deducting Total: GHS {total_deduction:,.2f} ({marks_to_remove} Marks)")
+                    db_marks = 0
+
+            total_deduction = requested_cash + db_fee
+
+            if requested_cash > 0 or is_migration:
+                # Validation Gate
+                if not is_migration:
+                    if total_marks_saved < abs(db_marks):
+                        st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}, Available: {total_marks_saved}")
+                        can_save = False
+                    elif total_deduction > (total_saved_ghs + 0.01):
+                        st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
+                        can_save = False
+                    else:
+                        db_amt = -float(requested_cash)
+                        st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} ({abs(db_marks)} Marks)")
+                else:
+                    # In migration, we use the values exactly as entered
+                    db_amt = -float(requested_cash)
 
         # --- 3. THE SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
-            if can_save and (db_amt != 0):
-                # Prepare the entry
+            if can_save and (db_amt != 0 or db_marks != 0):
                 new_entry = {
                     'amount': float(db_amt),
                     'client_name': target,
                     'date': trans_date.isoformat(),
                     'fee': float(db_fee),
-                    'marks_covered': int(db_marks) # This now handles both + and - marks
+                    'marks_covered': int(db_marks)
                 }
 
-                # Run the dual sync
-                is_synced = sync_data_dual(new_entry)
-
-                if is_synced:
+                if sync_data_dual(new_entry):
                     st.cache_data.clear() 
-                    st.success(f"✅ Transaction Recorded for {target}!")
-                    # Digital Receipt Touch
-                    with st.expander("📄 View Transaction Summary"):
-                        st.write(f"**Client:** {target}")
-                        st.write(f"**Amount:** GHS {abs(db_amt):,.2f}")
+                    st.success(f"✅ Transaction Synced for {target}!")
+                    
+                    with st.expander("📄 View Summary"):
+                        st.write(f"**Client ID:** {c_id}")
+                        st.write(f"**Net Amount:** GHS {db_amt:,.2f}")
+                        st.write(f"**Fee Taken:** GHS {db_fee:,.2f}")
                         st.write(f"**Marks Change:** {db_marks}")
+                    
                     st.balloons()
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("❌ Sync failed. Check connection.")
+                    st.error("❌ Sync failed. Check internet.")
     else:
-        st.warning("Please register clients first.")                 
+        st.warning("Please register clients in Admin Tools first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
@@ -578,7 +633,7 @@ elif choice == "📑 Digital Passbook":
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
             
-            # --- SAFETY FIX: Handle history even if contributions is empty ---
+            # --- AGGREGATE DATA ---
             if not contributions.empty and 'client_name' in contributions.columns:
                 user_history = contributions[contributions['client_name'] == target].copy()
                 total_marks = user_history['marks_covered'].sum() if 'marks_covered' in user_history.columns else 0
@@ -591,7 +646,6 @@ elif choice == "📑 Digital Passbook":
             # --- UI Display ---
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                # Check if photo exists, otherwise show a generic user icon
                 if c_info.get('photo_url') and str(c_info['photo_url']) != 'None':
                     st.image(c_info['photo_url'], use_container_width=True)
                 else:
@@ -609,7 +663,7 @@ elif choice == "📑 Digital Passbook":
             st.divider()
             
             # --- ACTION ROW ---
-            col_s1, col_s2 = st.columns(2)
+            col_s1, col_s2, col_s3 = st.columns(3)
             with col_s1:
                 # WhatsApp Share
                 formatted_phone = f"233{str(c_info['phone'])[-9:]}"
@@ -617,7 +671,7 @@ elif choice == "📑 Digital Passbook":
                 st.markdown(f'''
                     <a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">
                         <button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
-                            🟢 Send via WhatsApp
+                            🟢 WhatsApp
                         </button>
                     </a>
                 ''', unsafe_allow_html=True)
@@ -626,34 +680,54 @@ elif choice == "📑 Digital Passbook":
                 # Print Function
                 st.markdown("""
                     <button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
-                        🖨️ Print / Save PDF
+                        🖨️ Print PDF
                     </button>
+                """, unsafe_allow_html=True)
+                
+            with col_s3:
+                # Digital Thermal Receipt Trigger
+                show_receipt = st.button("🧾 Thermal Receipt")
+
+            # --- THERMAL RECEIPT PREVIEW ---
+            if show_receipt:
+                st.markdown(f"""
+                <div style="background-color: white; color: black; padding: 15px; font-family: 'Courier New', Courier, monospace; border: 1px dashed #000; width: 280px; margin: 10px auto; line-height: 1.2;">
+                    <center>
+                        <h3 style="margin:0;">RUCHANET SUSU</h3>
+                        <p style="font-size:10px; margin:0;">Daily Savings Services</p>
+                        <p style="margin:5px 0;">-----------------------</p>
+                        <p style="font-size:12px; margin:0;"><b>OFFICIAL RECEIPT</b></p>
+                    </center>
+                    <p style="font-size:12px; margin:10px 0 0 0;">
+                        <b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
+                        <b>Client:</b> {target}<br>
+                        <b>ID:</b> {c_info.get('client_id', 'N/A')}
+                    </p>
+                    <p style="margin:5px 0;">-----------------------</p>
+                    <p style="font-size:14px; margin:0;">
+                        <b>TOTAL BAL: GHS {current_balance:,.2f}</b><br>
+                        <b>TOTAL MARKS: {total_marks}</b>
+                    </p>
+                    <p style="margin:5px 0;">-----------------------</p>
+                    <center>
+                        <p style="font-size:10px; margin:0;">Thank you for saving with us!</p>
+                        <p style="font-size:9px;">Keep your digital records safe.</p>
+                    </center>
+                </div>
                 """, unsafe_allow_html=True)
 
             # History Table
             st.write("### 📝 Transaction History")
             if not user_history.empty:
                 user_h_display = user_history.copy()
-                
-                # SAFE DATE CONVERSION:
-                # We use errors='coerce' and check if it's already a string first
                 user_h_display['date'] = pd.to_datetime(user_h_display['date'], errors='coerce')
-                
-                # Filter out any rows where the date failed to convert
                 user_h_display = user_h_display.dropna(subset=['date'])
-                
-                # Now format it for the UI
                 user_h_display['date'] = user_h_display['date'].dt.strftime('%Y-%m-%d %I:%M %p')
                 
-                # Filter display columns safely
                 cols = [c for c in ['date', 'amount', 'marks_covered', 'fee'] if c in user_h_display.columns]
                 st.dataframe(user_h_display.sort_values(by='date', ascending=False)[cols], use_container_width=True)
             else:
                 st.info("No transaction history recorded yet.")
-        else:
-            st.warning("🔍 No client matches your search.")
-    else:
-        st.error("Please register clients in Admin Tools first.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
@@ -663,7 +737,7 @@ elif choice == "🛠 Admin Tools":
     
     with t1:
         st.subheader("👤 Register New Client")
-        # Keep camera outside the form
+        # Keep camera outside the form for stability
         photo = st.camera_input("Take Client Photo (Required)")
     
         with st.form("reg_form", clear_on_submit=True):
@@ -672,40 +746,43 @@ elif choice == "🛠 Admin Tools":
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
             reg_date = st.date_input("Registration Date", value=datetime.now())
             
-            # Show the ID they are about to get
+            # --- MANUAL ID OVERRIDE ---
+            # Suggest the next ID, but allow manual typing for old books
             suggested_id = get_next_gen_id(reg_date)
-            st.info(f"Next Available ID: {suggested_id}")
+            manual_id = st.text_input("Confirm Client ID", value=suggested_id, help="Format: Number/MM/YY")
             
             submit = st.form_submit_button("Register to Cloud")
             
             if submit: 
                 if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ All fields (Name, Phone, and Photo) are required")
+                    st.error("❌ Name, Phone, and Photo are all required.")
                 else:
                     try:
-                        # 1. Generate the ID and create a safe filename
-                        gen_id = get_next_gen_id(reg_date)
-                        # This replaces "/" with "-" so "001/03/26" becomes "001-03-26.jpg"
-                        file_name = f"{gen_id.replace('/', '-')}.jpg"
+                        # 1. Use the Manual ID if edited, otherwise the Suggested ID
+                        final_id = manual_id.strip() if manual_id.strip() else suggested_id
                         
-                        # 2. Upload Photo to Supabase Storage with 'upsert'
+                        # 2. Create a safe filename (Slashes '/' break storage paths)
+                        # Example: "031/03/26" becomes "031-03-26.jpg"
+                        safe_filename = f"{final_id.replace('/', '-')}.jpg"
+                        
+                        # 3. Upload Photo to Supabase
                         sb_client.storage.from_("client-photos").upload(
-                            path=file_name,
+                            path=safe_filename,
                             file=photo.getvalue(),
                             file_options={"content-type": "image/jpeg", "upsert": "true"}
                         )
 
-                        # 3. Construct Public URL
+                        # 4. Construct Public URL
                         base_url = st.secrets['supabase_url']
-                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{file_name}"
+                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
-                        # 4. Save to SQL Database
+                        # 5. Save to SQL Database
                         with conn.session as s:
                             s.execute(text("""
                                 INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                 VALUES (:i, :n, :p, :d, :u)
                             """), {
-                                "i": gen_id, 
+                                "i": final_id, 
                                 "n": name.strip(), 
                                 "p": phone.strip(), 
                                 "d": daily, 
@@ -713,13 +790,12 @@ elif choice == "🛠 Admin Tools":
                             })
                             s.commit()
                         
-                        st.success(f"✅ Registered {name} successfully!")
+                        st.success(f"✅ Registered {name} with ID: {final_id}")
                         st.balloons()
-                        time.sleep(2)
+                        time.sleep(1)
                         st.rerun()
 
                     except Exception as e:
-                        # This will catch the 403 error if your Storage Policies aren't set yet
                         st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
@@ -756,40 +832,31 @@ elif choice == "🛠 Admin Tools":
                     f_df['display'] = f_df.apply(lambda x: f"ROW:{x.name} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
                     to_del = st.selectbox("Select entry to remove", options=f_df['display'])
                     
-                    if st.button("🗑️ Permanent Delete Entry"):
-                        # Extract the unique index
+                    if st.button("🔄 Authorize Professional Reversal"):
                         selected_row_idx = int(to_del.split(" | ")[0].replace("ROW:", ""))
                         target_row = f_df.loc[selected_row_idx]
 
-                        try:
-                            with conn.session as s:
-                                # A. RECORD THE ACTION IN AUDIT LOG
-                                s.execute(text("""
-                                    INSERT INTO audit_logs (action_type, details, admin_name)
-                                    VALUES (:type, :details, :admin)
-                                """), {
-                                    "type": "TRANSACTION_DELETE",
-                                    "details": f"Deleted GHS {target_row['amount']} for {target_row['client_name']} (Original Date: {target_row['date']})",
-                                    "admin": "System Admin"
-                                })
-                                
-                                # B. DELETE THE ACTUAL RECORD
-                                s.execute(text("""
-                                    DELETE FROM contributions 
-                                    WHERE client_name = :n AND date = :d AND amount = :a
-                                """), {
-                                    "n": target_row['client_name'], 
-                                    "d": target_row['date'], 
-                                    "a": target_row['amount']
-                                })
-                                s.commit()
-                            
-                            st.toast("Security log updated & entry deleted.", icon="🛡️")
-                            st.cache_data.clear() 
-                            time.sleep(2)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Action failed: {e}")
+                        # Create balancing entry
+                        reversal_entry = {
+                            'amount': -float(target_row['amount']),
+                            'client_name': target_row['client_name'],
+                            'date': datetime.now().isoformat(),
+                            'fee': 0.0,
+                            'marks_covered': -int(target_row['marks_covered'])
+                        }
+
+                        if sync_data_dual(reversal_entry):
+                            try:
+                                with conn.session as s:
+                                    s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES (:t, :d, :a)"), 
+                                             {"t": "REVERSAL", "d": f"Reversed {target_row['amount']} for {target_row['client_name']}", "a": "Manager"})
+                                    s.commit()
+                                st.success("✅ Transaction reversed and logged.")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Audit Log Failed: {e}")
                 else:
                     st.info("No matching entries found.")
             else:

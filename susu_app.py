@@ -421,138 +421,114 @@ elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
     if not clients.empty:
-        # 1. Select Client & Migration Toggle
+        # 1. Selection UI
         col_search, col_mode = st.columns([2, 1])
         with col_search:
             client_list = clients['client_name'].tolist()
             target = st.selectbox("Select Client", client_list)
-        
         with col_mode:
-            is_migration = st.checkbox("📂 Migration Mode", help="Use this to backdate or record old physical passbook data.")
+            is_migration = st.checkbox("📂 Migration Mode", help="Use for backdating or manual adjustments.")
 
-        # Get Client Metadata
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
         c_id = client_row.get('client_id', 'N/A')
         
         # --- DATA RETRIEVAL ---
-        if not contributions.empty and 'client_name' in contributions.columns:
-            user_history = contributions[contributions['client_name'] == target]
-            total_saved_ghs = float(user_history['amount'].sum())
-            total_marks_saved = int(user_history['marks_covered'].sum())
-        else:
-            user_history = pd.DataFrame()
-            total_saved_ghs = 0.0
-            total_marks_saved = 0
+        user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
+        total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
+        total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
         
-        # --- PROGRESS TRACKER ---
-        try:
-            current_cycle_marks = int(total_marks_saved % 31)
-            progress_val = current_cycle_marks / 31.0
-            safe_progress = float(max(0.0, min(progress_val, 1.0)))
-        except (ZeroDivisionError, TypeError, ValueError):
-            current_cycle_marks = 0
-            safe_progress = 0.0
-        
-        st.write(f"🆔 **ID:** {c_id} | 📊 *Cycle:* **{current_cycle_marks}/31** Marks")
-        st.progress(safe_progress)
-        st.write(f"💰 **Total Balance:** GHS {total_saved_ghs:,.2f}")
-
+        st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
         st.divider()
 
-        # --- 2. TRANSACTION INPUTS ---
-        ttype = st.radio("Type", ["Deposit", "Withdrawal"], horizontal=True)
+        # --- 2. INPUTS ---
+        ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
         
-        # INITIALIZE VARIABLES (Fixes the NameError)
+        # Initialize variables to prevent NameErrors
         requested_cash = 0.0
         db_amt, db_marks, db_fee = 0.0, 0, 0.0
-        can_proceed = True
-
-        # Migration / Backdating Logic
-        if is_migration:
-            selected_date = st.date_input("Transaction Date", value=datetime.now().date())
-            trans_date = datetime.combine(selected_date, datetime.now().time())
-            st.warning(f"⚠️ Recording as Migration for Date: {selected_date}")
-        else:
-            trans_date = datetime.now()
 
         if ttype == "Deposit":
-            num_marks = st.number_input("Number of Marks to add", min_value=1, step=1)
+            num_marks = st.number_input("Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
-            db_marks = int(num_marks) 
+            db_marks = int(num_marks)
             st.info(f"➕ **Deposit:** GHS {db_amt:,.2f} | 📈 **Marks:** +{num_marks}")
             
-        else: # --- Withdrawal Logic ---
-            requested_cash = st.number_input("Cash to Withdraw (GHS)", min_value=0.0, step=1.0)
+        else: # --- WITHDRAWAL LOGIC (With Max Cash Helper) ---
+            w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
             
-            if is_migration:
-                db_fee = st.number_input("Service Fee (GHS)", min_value=0.0, value=0.0)
-                db_marks = st.number_input("Marks to Deduct (Negative)", value=0, step=1)
-            else:
-                db_fee = float(d_mark)
-                if d_mark > 0:
-                    if requested_cash % d_mark != 0:
-                        st.error(f"🚫 Invalid Amount! Must be a multiple of GHS {d_mark}.")
+            # --- HELPER: CALCULATE MAX CASH ---
+            if d_mark > 0:
+                if w_method == "Full Payout (Include Commission)":
+                    # Formula: For every 31 marks, 1 is reserved for commission.
+                    # We estimate how many cycles of 32 (31+1) exist in their total.
+                    est_commissions = math.ceil(total_marks_saved / 32)
+                    max_cash_marks = max(0, total_marks_saved - est_commissions)
+                    max_cash_allowed = float(max_cash_marks * d_mark)
+                    st.success(f"💡 **Suggested Max Cash (After Commission):** GHS {max_cash_allowed:,.2f}")
+                else:
+                    # Advance payments can technically take all available cash, 
+                    # but suggest the current balance.
+                    st.info(f"💡 **Current Balance Available:** GHS {total_saved_ghs:,.2f}")
+
+            requested_cash = st.number_input("Cash Amount to Withdraw (GHS)", min_value=0.0, step=d_mark)
+            
+            if d_mark > 0:
+                # Calculate how many marks the requested cash represents
+                marks_for_cash = int(requested_cash / d_mark)
+                
+                if w_method == "Full Payout (Include Commission)":
+                    # TIERED COMMISSION: 1-31 marks = 1 mark fee, 32-62 marks = 2 marks fee
+                    num_commissions = math.ceil(marks_for_cash / 31)
+                    db_fee = float(num_commissions * d_mark)
+                    db_marks = -(marks_for_cash + num_commissions)
+                else:
+                    # ADVANCE PAYMENT: Deduct marks for cash only. Fee is 0.
+                    db_fee = 0.0
+                    db_marks = -marks_for_cash
+                
+                total_deduction = requested_cash + db_fee
+                db_amt = -float(total_deduction)
+
+                # Validation logic to prevent balance/commission cheating
+                if requested_cash > 0:
+                    if total_marks_saved < abs(db_marks):
+                        st.error(f"🚫 Insufficient Marks! Needed (Cash + Fee): {abs(db_marks)}, Have: {total_marks_saved}")
+                        st.stop()
+                    if total_deduction > (total_saved_ghs + 0.01):
+                        st.error("⚠️ Insufficient Balance to cover both Cash and Commission Fee.")
                         st.stop()
                     
-                    marks_to_remove = math.ceil(requested_cash / d_mark) + 1
-                    db_marks = -int(marks_to_remove)
-                else:
-                    db_marks = 0
+                    st.warning(f"📉 **Total Deduction:** GHS {total_deduction:,.2f} (Cash: {requested_cash} + Fee: {db_fee})")
 
-            # CALCULATE TOTAL DEDUCTION (Cash + Commission)
-            total_deduction = requested_cash + db_fee
-
-            # Manager Override Logic
-            if abs(db_marks) < 31:
-                st.warning(f"⚠️ Transaction involves only {abs(db_marks)} marks.")
-                if st.session_state.get("role") == "Manager":
-                    override = st.checkbox("🔓 Authorize Emergency Withdrawal")
-                    if not override:
-                        st.stop()
-                else:
-                    st.error("🚫 Only a Manager can authorize withdrawals under 31 marks.")
-                    st.stop()
-
-            # --- 5. CASH & MARKS VALIDATION ---
-            if requested_cash > 0 or is_migration:
-                if not is_migration:
-                    if total_marks_saved < abs(db_marks):
-                        st.error(f"🚫 Insufficient Marks! Needed: {abs(db_marks)}")
-                        st.stop()
-                    elif total_deduction > (total_saved_ghs + 0.01):
-                        st.error(f"⚠️ Insufficient Cash! (Available: GHS {total_saved_ghs:,.2f})")
-                        st.stop()
-                    else:
-                        # FIX: Subtract BOTH the cash and the fee from the amount field
-                        db_amt = -float(total_deduction)
-                        st.warning(f"📉 Total Deduction: GHS {total_deduction:,.2f} (Cash: {requested_cash} + Fee: {db_fee})")
-                else:
-                    db_amt = -float(requested_cash + db_fee)
-            
-        # --- 6. THE SYNC BUTTON ---
+        # --- 3. SYNC BUTTON ---
         if st.button("🚀 Confirm & Sync Transaction"):
-            new_entry = {
-                'amount': float(db_amt),
-                'client_name': target,
-                'date': trans_date.isoformat(),
-                'fee': float(db_fee),
-                'marks_covered': int(db_marks)
-            }
-
-            if sync_data_dual(new_entry):
-                st.cache_data.clear() 
-                st.success(f"✅ Transaction Synced for {target}!")
-                st.balloons()
-                time.sleep(2)
-                st.rerun()
+            # Ensure we don't sync 0.0 transactions unless it's a migration
+            if db_amt == 0 and not is_migration:
+                st.error("Please enter a valid transaction amount.")
             else:
-                st.error("❌ Sync failed. Check internet.")
+                new_entry = {
+                    'amount': float(db_amt),
+                    'client_name': target,
+                    'date': datetime.now().isoformat(),
+                    'fee': float(db_fee),
+                    'marks_covered': int(db_marks)
+                }
+
+                if sync_data_dual(new_entry):
+                    st.cache_data.clear() 
+                    st.success(f"✅ Transaction Synced Successfully for {target}!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ Sync failed. Please check your connection.")
     else:
         st.warning("Please register clients in Admin Tools first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
+    
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if not clients.empty:
@@ -566,98 +542,68 @@ elif choice == "📑 Digital Passbook":
             # --- AGGREGATE DATA ---
             if not contributions.empty and 'client_name' in contributions.columns:
                 user_history = contributions[contributions['client_name'] == target].copy()
-                total_marks = user_history['marks_covered'].sum() if 'marks_covered' in user_history.columns else 0
-                current_balance = user_history['amount'].sum() if 'amount' in user_history.columns else 0.0
+                total_marks = int(user_history['marks_covered'].sum())
+                current_balance = float(user_history['amount'].sum())
             else:
                 user_history = pd.DataFrame()
                 total_marks = 0
                 current_balance = 0.0
             
-            # --- UI Display ---
+            # --- UI PROFILE DISPLAY ---
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                if c_info.get('photo_url') and str(c_info['photo_url']) != 'None':
-                    st.image(c_info['photo_url'], use_container_width=True)
+                photo = c_info.get('photo_url')
+                if photo and str(photo) not in ['None', 'nan', '']:
+                    st.image(photo, use_container_width=True)
                 else:
-                    st.info("No photo available")
+                    st.info("📷 No Photo")
             
             with col_b:
-                st.subheader(f"Account: {target}")
-                st.write(f"🆔 *ID:* {c_info.get('client_id', 'N/A')}")
-                st.write(f"📞 *Phone:* {c_info.get('phone', 'N/A')}")
+                st.subheader(f"User: {target}")
+                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
+                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
+                # ADDED: Daily Mark row in the profile text
+                st.write(f"🏷️ **Daily Mark Rate:** GHS {c_info.get('daily_mark', 0.0):,.2f}")
                 
-                m1, m2 = st.columns(2)
+                # Metrics Row
+                m1, m2, m3 = st.columns(3)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Marks", f"{total_marks}")
+                # ADDED: Daily Mark as a metric for quick viewing
+                m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
 
             st.divider()
             
             # --- ACTION ROW ---
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
-                # WhatsApp Share
-                formatted_phone = f"233{str(c_info['phone'])[-9:]}"
-                wa_msg = f"📑 RUCHANET PASSBOOK%0A👤 Client: {target}%0A💰 Balance: GHS {current_balance:,.2f}%0A📅 Total Marks: {total_marks}"
-                st.markdown(f'''
-                    <a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">
-                        <button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
-                            🟢 WhatsApp
-                        </button>
-                    </a>
-                ''', unsafe_allow_html=True)
+            # Updated WhatsApp message to include the Daily Mark
+            raw_phone = str(c_info.get('phone', ''))
+            formatted_phone = f"233{raw_phone[-9:]}"
+            daily_rate = c_info.get('daily_mark', 0.0)
             
-            with col_s2:
-                # Print Function
-                st.markdown("""
-                    <button onclick="window.print()" style="background-color: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
-                        🖨️ Print PDF
+            wa_msg = (
+                f"📑 *RUCHANET PASSBOOK*%0A"
+                f"👤 *Client:* {target}%0A"
+                f"🏷️ *Daily Rate:* GHS {daily_rate:,.2f}%0A"
+                f"💰 *Balance:* GHS {current_balance:,.2f}%0A"
+                f"📅 *Total Marks:* {total_marks}"
+            )
+            
+            st.markdown(f'''
+                <a href="https://wa.me/{formatted_phone}?text={wa_msg}" target="_blank">
+                    <button style="background-color: #25D366; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold;">
+                        🟢 Share to WhatsApp
                     </button>
-                """, unsafe_allow_html=True)
-                
-            with col_s3:
-                # Digital Thermal Receipt Trigger
-                show_receipt = st.button("🧾 Thermal Receipt")
-
-            # --- THERMAL RECEIPT PREVIEW ---
-            if show_receipt:
-                st.markdown(f"""
-                <div style="background-color: white; color: black; padding: 15px; font-family: 'Courier New', Courier, monospace; border: 1px dashed #000; width: 280px; margin: 10px auto; line-height: 1.2;">
-                    <center>
-                        <h3 style="margin:0;">RUCHANET SUSU</h3>
-                        <p style="font-size:10px; margin:0;">Daily Savings Services</p>
-                        <p style="margin:5px 0;">-----------------------</p>
-                        <p style="font-size:12px; margin:0;"><b>OFFICIAL RECEIPT</b></p>
-                    </center>
-                    <p style="font-size:12px; margin:10px 0 0 0;">
-                        <b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
-                        <b>Client:</b> {target}<br>
-                        <b>ID:</b> {c_info.get('client_id', 'N/A')}
-                    </p>
-                    <p style="margin:5px 0;">-----------------------</p>
-                    <p style="font-size:14px; margin:0;">
-                        <b>TOTAL BAL: GHS {current_balance:,.2f}</b><br>
-                        <b>TOTAL MARKS: {total_marks}</b>
-                    </p>
-                    <p style="margin:5px 0;">-----------------------</p>
-                    <center>
-                        <p style="font-size:10px; margin:0;">Thank you for saving with us!</p>
-                        <p style="font-size:9px;">Keep your digital records safe.</p>
-                    </center>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # History Table
-            st.write("### 📝 Transaction History")
+                </a>
+            ''', unsafe_allow_html=True)
+            
+            # Transaction Table
             if not user_history.empty:
-                user_h_display = user_history.copy()
-                user_h_display['date'] = pd.to_datetime(user_h_display['date'], errors='coerce')
-                user_h_display = user_h_display.dropna(subset=['date'])
-                user_h_display['date'] = user_h_display['date'].dt.strftime('%Y-%m-%d %I:%M %p')
-                
-                cols = [c for c in ['date', 'amount', 'marks_covered', 'fee'] if c in user_h_display.columns]
-                st.dataframe(user_h_display.sort_values(by='date', ascending=False)[cols], use_container_width=True)
-            else:
-                st.info("No transaction history recorded yet.")
+                st.write("### 📜 Transaction History")
+                st.dataframe(user_history[['date', 'amount', 'marks_covered', 'fee']], use_container_width=True)
+        else:
+            st.warning("No client found.")
+    else:
+        st.warning("Please register clients first.")
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":

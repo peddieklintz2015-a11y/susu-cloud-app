@@ -355,8 +355,8 @@ with st.sidebar:
         * Android: Tap ⋮ and 'Install App'.
         * iOS: Tap Share 📤 and 'Add to Home Screen'.
         """)
-    
     st.divider()
+
     # --- NETWORK & SCHEMA HEALTH CHECK ---
     try:
         # Check if we can connect to the database
@@ -378,6 +378,10 @@ with st.sidebar:
         <p style="margin:0; font-weight: bold;">Cloud: {db_status} | {schema_status}</p>
     </div>
     """, unsafe_allow_html=True)
+    # 4. BRING BACK RECENT ACTIVITY
+    # This calls the function you showed in your photo!
+    st.divider()
+    draw_sidebar_log(contributions)
     if st.checkbox("Show Install Guide"):
         st.info("Android: Tap ⋮ and 'Install'. \niOS: Tap Share and 'Add to Home Screen'.")
     

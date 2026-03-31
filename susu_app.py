@@ -380,9 +380,12 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # 4. RECENT ACTIVITY LOG
-    # This pulls in the function you defined earlier
     st.divider()
     draw_sidebar_log(contributions)
+    
+    # DELETE THE EXTRA CHECKBOX THAT WAS HERE!
+    
+    st.divider()
 
 if choice == "📊 Dashboard":
     # --- 2. THE MAIN TABLE (FIXED) ---

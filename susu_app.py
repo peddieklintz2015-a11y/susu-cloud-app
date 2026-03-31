@@ -185,13 +185,11 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
-
     # DYNAMIC MENU
     if st.session_state["role"] == "Manager":
         menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
     else:
-        menu = ["💸 Transactions", "📑 Digital Passbook"]
-    
+        menu = ["💸 Transactions", "📑 Digital Passbook"]    
 def draw_sidebar_log(df):
         st.divider()
         with st.expander("🕒 Quick Activity Log", expanded=False):

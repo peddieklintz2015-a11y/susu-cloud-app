@@ -140,6 +140,41 @@ def fetch_data():
         st.error(f"Mapping Error: {e}")
         return pd.DataFrame(), pd.DataFrame()
     
+def check_password():
+    if "role" not in st.session_state:
+        st.title("🔐 RUCHANET SYSTEM LOGIN")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            with st.form("agent_login"):
+                st.subheader("👤 Agent Login")
+                if st.form_submit_button("Access Collector Tools"):
+                    st.session_state["role"] = "Agent"
+                    st.rerun()
+        
+        with col2:
+            with st.form("admin_login"):
+                st.subheader("🛡️ Manager Login")
+                pwd = st.text_input("Manager Password", type="password")
+                if st.form_submit_button("Verify Identity"):
+                    if pwd == st.secrets["passwords"]["login_password"]: 
+                        st.session_state["role"] = "Manager"
+                        st.rerun()
+                    else:
+                        st.error("Invalid Manager Password")
+        
+        # --- THIS IS THE SECRET SAUCE ---
+        st.stop() # This prevents EVERYTHING below this line from running
+        
+    return True
+
+# Now, call the function at the start of your app
+check_password()
+
+# EVERYTHING BELOW HERE IS NOW SAFE
+# It will only run if check_password() didn't hit st.stop()
+role = st.session_state.get("role")
+    
 def draw_sidebar_log(df):
         st.divider()
         with st.expander("🕒 Quick Activity Log", expanded=False):
@@ -267,51 +302,6 @@ def get_next_gen_id(reg_date):
         st.error(f"⚠️ ID Generation Error: {e}") 
         # Fallback to 001 if something goes wrong
         return f"001/{mm_yy}"
-    
-# --- UPDATE SECURITY SECTION ---
-def check_password():
-    if "role" not in st.session_state:
-        st.title("🔐 RUCHANET SYSTEM LOGIN")
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.form("agent_login"):
-                st.subheader("👤 Agent Login")
-                if st.form_submit_button("Access Collector Tools"):
-                    st.session_state["role"] = "Agent"
-                    st.rerun()
-        with col2:
-            with st.form("admin_login"):
-                st.subheader("🛡️ Manager Login")
-                pwd = st.text_input("Manager Password", type="password")
-                if st.form_submit_button("Verify Identity"):
-                    if pwd == st.secrets["passwords"]["login_password"]:
-                        st.session_state["role"] = "Manager"
-                        st.rerun()
-                    else:
-                        st.error("Invalid Manager Password")
-        return False
-    return True
-
-# --- 2. THE MAIN GATE ---
-if check_password():
-    # Everything from here down MUST be indented
-    
-    # Put the Logout button and User info here, inside the gate
-    st.sidebar.success(f"Logged in as: {st.session_state['role']}")
-    if st.sidebar.button("Logout / Switch User"):
-        del st.session_state["role"]
-        st.rerun()
-    
-    st.sidebar.divider()
-
-    # Now define your menu
-    if st.session_state["role"] == "Manager":
-        menu_options = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
-    else:
-        menu_options = ["💸 Transactions", "📑 Digital Passbook"]
-
-    # Use a UNIQUE KEY here to prevent the duplicate error
-    choice = st.sidebar.selectbox("Go To:", menu_options, key="main_nav_menu")
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()

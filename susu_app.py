@@ -851,35 +851,24 @@ elif choice == "🛠 Admin Tools":
                 f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
                 
                 if not f_df.empty:
-                    # Using the row index (x.name) ensures we delete the EXACT record chosen
-                    f_df['display'] = f_df.apply(lambda x: f"ROW:{x.name} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-                    to_del = st.selectbox("Select entry to remove", options=f_df['display'])
+                    # --- ALL OF THIS MUST BE INDENTED FURTHER ---
+                    f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
+                    to_del = st.selectbox("Select entry to PERMANENTLY REMOVE", options=f_df['display'], key="delete_selector")
                     
-                    if st.button("🔄 Authorize Professional Reversal"):
-                        selected_row_idx = int(to_del.split(" | ")[0].replace("ROW:", ""))
-                        target_row = f_df.loc[selected_row_idx]
-
-                        # Create balancing entry
-                        reversal_entry = {
-                            'amount': -float(target_row['amount']),
-                            'client_name': target_row['client_name'],
-                            'date': datetime.now().isoformat(),
-                            'fee': 0.0,
-                            'marks_covered': -int(target_row['marks_covered'])
-                        }
-
-                        if sync_data_dual(reversal_entry):
-                            try:
-                                with conn.session as s:
-                                    s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES (:t, :d, :a)"), 
-                                             {"t": "REVERSAL", "d": f"Reversed {target_row['amount']} for {target_row['client_name']}", "a": "Manager"})
-                                    s.commit()
-                                st.success("✅ Transaction reversed and logged.")
-                                st.cache_data.clear()
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Audit Log Failed: {e}")
+                    if st.button("🗑️ Authorize Permanent Wipe"):
+                        try:
+                            selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
+                            with conn.session as s:
+                                s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": selected_id})
+                                s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('WIPE', :d, 'Manager')"), 
+                                         {"d": f"Wiped record {selected_id}"})
+                                s.commit()
+                            st.success(f"💥 Record {selected_id} vanished!")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
                 else:
                     st.info("No matching entries found.")
             else:

@@ -270,7 +270,7 @@ def get_next_gen_id(reg_date):
     
 # --- UPDATE SECURITY SECTION ---
 def check_password():
-    # If no role is set, show the login screen
+    # 1. If no role is set, show the login screen
     if "role" not in st.session_state:
         st.title("🔐 RUCHANET SYSTEM LOGIN")
         col1, col2 = st.columns(2)
@@ -278,6 +278,8 @@ def check_password():
         with col1:
             with st.form("agent_login"):
                 st.subheader("👤 Agent Login")
+                st.info("Access for field collectors. No password required.")
+                # Password-free entry for Agents
                 if st.form_submit_button("Access Collector Tools"):
                     st.session_state["role"] = "Agent"
                     st.rerun()
@@ -285,16 +287,24 @@ def check_password():
         with col2:
             with st.form("admin_login"):
                 st.subheader("🛡️ Manager Login")
-                # Using a placeholder for secrets if not set for testing
+                # This input will be checked against line 11 of your secrets.toml
                 pwd = st.text_input("Manager Password", type="password")
                 if st.form_submit_button("Verify Identity"):
-                    # Replace with your actual st.secrets logic
-                    if pwd == "admin123": 
+                    # Linked to 'login_password' (Line 11 in your screenshot)
+                    if pwd == st.secrets["passwords"]["login_password"]: 
                         st.session_state["role"] = "Manager"
                         st.rerun()
                     else:
                         st.error("Invalid Manager Password")
         return False
+    
+    # 2. Show the switch/logout option once logged in
+    st.sidebar.markdown(f"**Current User: {st.session_state['role']}**")
+    if st.sidebar.button("Logout / Switch User"):
+        del st.session_state["role"]
+        st.rerun()
+        
+    return True
     
     # --- ADDED: LOGOUT / SWITCH USER FUNCTIONALITY ---
     # This adds a button to the sidebar to clear the session

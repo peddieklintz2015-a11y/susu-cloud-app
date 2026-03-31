@@ -284,38 +284,34 @@ def check_password():
                 st.subheader("🛡️ Manager Login")
                 pwd = st.text_input("Manager Password", type="password")
                 if st.form_submit_button("Verify Identity"):
-                    if pwd == st.secrets["passwords"]["login_password"]: 
+                    if pwd == st.secrets["passwords"]["login_password"]:
                         st.session_state["role"] = "Manager"
                         st.rerun()
                     else:
                         st.error("Invalid Manager Password")
         return False
+    return True
+
+# --- 2. THE MAIN GATE ---
+if check_password():
+    # Everything from here down MUST be indented
     
-    # Logout button for when they ARE logged in
-    st.sidebar.markdown(f"*Current User: {st.session_state['role']}*")
+    # Put the Logout button and User info here, inside the gate
+    st.sidebar.success(f"Logged in as: {st.session_state['role']}")
     if st.sidebar.button("Logout / Switch User"):
         del st.session_state["role"]
         st.rerun()
-    return True
-
-# --- 2. THE SECURITY GATE ---
-# Everything below this line MUST be indented!
-if check_password():
     
-    # 2a. Fetch Data only after login
-    clients, contributions = fetch_data()
-    role = st.session_state.get("role")
+    st.sidebar.divider()
 
-    # 2b. Define Menu based on Role
-    if role == "Manager":
-        menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
+    # Now define your menu
+    if st.session_state["role"] == "Manager":
+        menu_options = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
     else:
-        menu = ["💸 Transactions", "📑 Digital Passbook"]
+        menu_options = ["💸 Transactions", "📑 Digital Passbook"]
 
-    # 2c. Sidebar Navigation
-    with st.sidebar:
-        st.title("📱 RUCHANET APP")
-        choice = st.selectbox("Go To:", menu)
+    # Use a UNIQUE KEY here to prevent the duplicate error
+    choice = st.sidebar.selectbox("Go To:", menu_options, key="main_nav_menu")
 
 # --- 5. DATA INIT ---
 clients, contributions = fetch_data()

@@ -121,6 +121,7 @@ if st.secrets["app_settings"]["maintenance_mode"]:
 
 # --- 4. DATABASE CONNECTIONS ---
 conn = st.connection("postgresql", type="sql")
+menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 try:
     sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 except Exception as e:
@@ -140,8 +141,6 @@ with st.sidebar:
         """)
     
     st.divider()
-
-menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 
 set_custom_style()
 
@@ -246,6 +245,22 @@ def send_weekly_report(contributions_df, manual=False):
         if manual: 
             st.error(f"Error: {e}")
         return False
+    
+def show_quick_log(df):
+    """Displays the activity log in the sidebar only when called."""
+    with st.sidebar:
+        st.divider()
+        with st.expander("🕒 Quick Activity Log", expanded=False):
+            if not df.empty:
+                # Sort by date descending and take top 5
+                log_data = df.tail(5).sort_values(by='date', ascending=False)
+                st.dataframe(
+                    log_data,
+                    column_order=("client_name", "amount"),
+                    hide_index=True
+                )
+            else:
+                st.info("No activity yet.")
 
 def get_next_gen_id(reg_date):
     # Format month and year: e.g., "03/26"
@@ -362,7 +377,6 @@ if now.weekday() == 6 and now.hour >= 8:
             st.toast(f"📧 Sunday Report Sent at {now.strftime('%I:%M %p')}", icon="📅")
 
 # --- 6. NAVIGATION ---
-menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 with st.sidebar:
     st.title("📱 App Options")
     
@@ -393,20 +407,10 @@ with st.sidebar:
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---
-    with st.sidebar:
-        st.divider()
-        with st.expander("🕒 Quick Activity Log", expanded=False):
-            if not contributions.empty:
-                st.dataframe(
-                    contributions.tail(5).sort_values(by='date', ascending=False),
-                    column_order=("client_name", "amount"),
-                    hide_index=True
-                )
-            else:
-                st.info("No activity yet.")
+    # CALL THE FUNCTION HERE: This ensures it ONLY shows on this page
+    show_quick_log(contributions)
 
-    # --- 2. MAIN DASHBOARD UI ---
+    # --- MAIN DASHBOARD UI ---
     head_col, btn_col = st.columns([4, 1])
     with head_col:
         st.title("📊 Financial Overview")
@@ -415,13 +419,14 @@ if choice == "📊 Dashboard":
             st.cache_data.clear()
             st.rerun()
 
-    # 2. Key Metrics Logic
+    # 4. Key Metrics Logic
     m1, m2, m3, m4 = st.columns(4)
     total_client_count = len(clients) if not clients.empty else 0
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
     if not contributions.empty:
         df_display = contributions.copy()
+        # Convert date to datetime for calculations
         df_display['date_dt'] = pd.to_datetime(df_display['date'], errors='coerce', utc=True)
         df_display = df_display.dropna(subset=['date_dt'])
         
@@ -440,7 +445,7 @@ if choice == "📊 Dashboard":
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
         m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}", delta=f"Diff: GHS {daily_diff:,.2f}", delta_color="inverse")
 
-        # --- 3. MONTHLY PROFIT CHART ---
+        # --- MONTHLY PROFIT CHART ---
         st.divider()
         st.subheader("📈 Monthly Commission Growth")
         
@@ -451,7 +456,7 @@ if choice == "📊 Dashboard":
 
         st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
 
-        # --- 4. DATA EXPORT ---
+        # --- DATA EXPORT ---
         with st.expander("📥 Download Records"):
             csv = contributions.to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV", data=csv, file_name="susu_records.csv", mime="text/csv")

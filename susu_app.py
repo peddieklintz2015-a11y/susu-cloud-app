@@ -246,16 +246,16 @@ def send_weekly_report(contributions_df, manual=False):
             st.error(f"Error: {e}")
         return False
     
-def show_quick_log(df):
-    """Displays the activity log in the sidebar only when called."""
+# --- 1. DEFINE THE SIDEBAR LOG FUNCTION ---
+# This is the "blueprint" for that circled table. 
+# It won't show up until we specifically tell it to.
+def draw_sidebar_log(df):
     with st.sidebar:
         st.divider()
         with st.expander("🕒 Quick Activity Log", expanded=False):
             if not df.empty:
-                # Sort by date descending and take top 5
-                log_data = df.tail(5).sort_values(by='date', ascending=False)
                 st.dataframe(
-                    log_data,
+                    df.tail(5).sort_values(by='date', ascending=False),
                     column_order=("client_name", "amount"),
                     hide_index=True
                 )
@@ -407,10 +407,11 @@ with st.sidebar:
 choice = st.sidebar.selectbox("Go To:", menu)
 
 if choice == "📊 Dashboard":
-    # CALL THE FUNCTION HERE: This ensures it ONLY shows on this page
-    show_quick_log(contributions)
+    # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---
+    # WE ONLY CALL THE LOG HERE!
+    draw_sidebar_log(contributions)
 
-    # --- MAIN DASHBOARD UI ---
+    # --- 2. MAIN DASHBOARD UI ---
     head_col, btn_col = st.columns([4, 1])
     with head_col:
         st.title("📊 Financial Overview")
@@ -419,14 +420,13 @@ if choice == "📊 Dashboard":
             st.cache_data.clear()
             st.rerun()
 
-    # 4. Key Metrics Logic
+    # 2. Key Metrics Logic
     m1, m2, m3, m4 = st.columns(4)
     total_client_count = len(clients) if not clients.empty else 0
     m1.metric("👥 Total Clients", f"{total_client_count}")
 
     if not contributions.empty:
         df_display = contributions.copy()
-        # Convert date to datetime for calculations
         df_display['date_dt'] = pd.to_datetime(df_display['date'], errors='coerce', utc=True)
         df_display = df_display.dropna(subset=['date_dt'])
         
@@ -445,7 +445,7 @@ if choice == "📊 Dashboard":
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
         m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}", delta=f"Diff: GHS {daily_diff:,.2f}", delta_color="inverse")
 
-        # --- MONTHLY PROFIT CHART ---
+        # --- 3. MONTHLY PROFIT CHART ---
         st.divider()
         st.subheader("📈 Monthly Commission Growth")
         
@@ -456,7 +456,7 @@ if choice == "📊 Dashboard":
 
         st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
 
-        # --- DATA EXPORT ---
+        # --- 4. DATA EXPORT ---
         with st.expander("📥 Download Records"):
             csv = contributions.to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV", data=csv, file_name="susu_records.csv", mime="text/csv")

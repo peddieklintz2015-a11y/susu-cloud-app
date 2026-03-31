@@ -342,21 +342,22 @@ if now.weekday() == 6 and now.hour >= 8:
 with st.sidebar:
     st.title("📱 App Options")
     
-    # 1. NAVIGATION (Now at the very top)
-    choice = st.sidebar.selectbox("Go To:", menu)
+    # 1. NAVIGATION (At the very top)
+    choice = st.selectbox("Go To:", menu)
     
     st.divider()
 
-    # 2. COMBINED INSTALL GUIDE (Only one instance to avoid error)
+    # 2. COMBINED INSTALL GUIDE (Only ONE instance here to prevent errors)
     if st.checkbox("Show Install Guide"):
         st.info("""
-        To Install on Phone:
-        * Android: Tap ⋮ and 'Install App'.
-        * iOS: Tap Share 📤 and 'Add to Home Screen'.
+        **To Install on Phone:**
+        * *Android:* Tap ⋮ and 'Install App'.
+        * *iOS:* Tap Share 📤 and 'Add to Home Screen'.
         """)
+    
     st.divider()
 
-    # --- NETWORK & SCHEMA HEALTH CHECK ---
+    # 3. NETWORK & SCHEMA HEALTH CHECK
     try:
         # Check if we can connect to the database
         conn.session.execute(text("SELECT 1"))
@@ -370,28 +371,29 @@ with st.sidebar:
         if 'client_name' not in clients.columns:
             schema_status = "⚠️ Schema Error"
     
-    # Display Status as a clean "Status Bar" in the sidebar
+    # Display Status as a clean "Status Bar"
     st.markdown(f"""
     <div style="background-color: #343a40; padding: 10px; border-radius: 5px; border-left: 5px solid #FFD700;">
         <p style="margin:0; font-size: 12px; color: #adb5bd;">SYSTEM STATUS</p>
         <p style="margin:0; font-weight: bold;">Cloud: {db_status} | {schema_status}</p>
     </div>
     """, unsafe_allow_html=True)
-    # 4. BRING BACK RECENT ACTIVITY
-    # This calls the function you showed in your photo!
+
+    # 4. RECENT ACTIVITY LOG
+    # This pulls in the function you defined earlier
     st.divider()
     draw_sidebar_log(contributions)
-    if st.checkbox("Show Install Guide"):
-        st.info("Android: Tap ⋮ and 'Install'. \niOS: Tap Share and 'Add to Home Screen'.")
+
+if choice == "📊 Dashboard":
+    # --- 2. THE MAIN TABLE (FIXED) ---
+    # We put this HERE so it ONLY shows on the Dashboard page!
+    if not combined_df.empty:
+        st.write("### 📋 Recent Transaction Table")
+        st.dataframe(combined_df, use_container_width=True)
     
     st.divider()
 
-if choice == "📊 Dashboard":
-    # --- 1. QUICK MONITOR (MOVING TO SIDEBAR TO CLEAN MAIN UI) ---
-    # WE ONLY CALL THE LOG HERE!
-    draw_sidebar_log(contributions)
-
-    # --- 2. MAIN DASHBOARD UI ---
+    # --- 3. MAIN DASHBOARD UI ---
     head_col, btn_col = st.columns([4, 1])
     with head_col:
         st.title("📊 Financial Overview")
@@ -400,7 +402,7 @@ if choice == "📊 Dashboard":
             st.cache_data.clear()
             st.rerun()
 
-    # 2. Key Metrics Logic
+    # Key Metrics Logic
     m1, m2, m3, m4 = st.columns(4)
     total_client_count = len(clients) if not clients.empty else 0
     m1.metric("👥 Total Clients", f"{total_client_count}")
@@ -412,7 +414,7 @@ if choice == "📊 Dashboard":
         
         total_vault = df_display['amount'].sum()
         total_commissions = df_display['fee'].sum()
-        net_liability = total_vault - total_commissions 
+        net_liability = total_vault - total_commissions
         
         today_date = datetime.now().date()
         yesterday_date = today_date - pd.Timedelta(days=1)
@@ -425,7 +427,7 @@ if choice == "📊 Dashboard":
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
         m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}", delta=f"Diff: GHS {daily_diff:,.2f}", delta_color="inverse")
 
-        # --- 3. MONTHLY PROFIT CHART ---
+        # --- 4. MONTHLY PROFIT CHART ---
         st.divider()
         st.subheader("📈 Monthly Commission Growth")
         
@@ -436,7 +438,7 @@ if choice == "📊 Dashboard":
 
         st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
 
-        # --- 4. DATA EXPORT ---
+        # --- 5. DATA EXPORT ---
         with st.expander("📥 Download Records"):
             csv = contributions.to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV", data=csv, file_name="susu_records.csv", mime="text/csv")

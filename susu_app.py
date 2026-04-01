@@ -614,52 +614,56 @@ elif choice == "📑 Digital Passbook":
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = filtered[filtered['client_name'] == target].iloc[0]
             
-            # --- PHOTO DISPLAY ---
-            col_img, col_details = st.columns([1, 3])
+            # Get basic info for the header
+            daily_rate = float(c_info.get('daily_mark', 0.0))
+            user_history = contributions[contributions['client_name'] == target].copy()
+            current_bal = user_history['amount'].sum() if not user_history.empty else 0.0
+            total_marks = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
+
+            # --- NEW HEADER LAYOUT ---
+            col_img, col_details = st.columns([1, 2])
+            
             with col_img:
                 p_url = c_info.get('photo_url')
                 if p_url and pd.notna(p_url):
-                    st.image(p_url, width=250)
+                    st.image(p_url, width=180)
                 else:
                     st.warning("👤 No Photo")
             
             with col_details:
                 st.subheader(target)
+                # Grouping all info together next to the photo
                 st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
                 st.write(f"📞 **Contact:** {c_info.get('phone', 'N/A')}")
+                st.markdown("---") # Thin separator
+                
+                # Metrics now live inside the detail column
+                m_col1, m_col2, m_col3 = st.columns(3)
+                m_col1.caption("💰 Balance")
+                m_col1.write(f"**GHS {current_bal:,.2f}**")
+                
+                m_col2.caption("📅 Marks")
+                m_col2.write(f"**{total_marks}**")
+                
+                m_col3.caption("📉 Rate")
+                m_col3.write(f"**GHS {daily_rate:,.2f}**")
 
-            # --- HISTORY AGGREGATION ---
-            user_history = contributions[contributions['client_name'] == target].copy()
-            
-            # Restoration of the Daily Rate variable
-            daily_rate = float(c_info.get('daily_mark', 0.0))
-            
+            st.divider()
+
+            # --- HISTORY SECTION ---
             if not user_history.empty:
                 def safe_parse(d):
                     try: 
                         return pd.to_datetime(d)
-                    except Exception: 
+                    except Exception:
                         return pd.to_datetime(d, errors='coerce')
                 
                 user_history['date'] = user_history['date'].apply(safe_parse)
                 user_history = user_history.sort_values(by='date', ascending=False)
                 
-                # --- RESTORED METRICS BAR ---
-                m1, m2, m3 = st.columns(3)
-                current_bal = user_history['amount'].sum()
-                total_marks = int(user_history['marks_covered'].sum())
-                
-                m1.metric("💰 Balance", f"GHS {current_bal:,.2f}")
-                m2.metric("📅 Total Marks", f"{total_marks}")
-                m3.metric("📉 Daily Rate", f"GHS {daily_rate:,.2f}")
-                st.divider()
-
                 for idx, row in user_history.iterrows():
                     t_label = f"{row['date'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['date']) else 'Unknown'} | GHS {abs(row['amount']):,.2f}"
                     with st.expander(t_label):
-                        st.write(f"**Marks Covered:** {row['marks_covered']}")
-                        
-                        # Receipt call with fixed parameters
                         generate_susu_receipt(
                             idx=idx, 
                             date_val=row['date'], 

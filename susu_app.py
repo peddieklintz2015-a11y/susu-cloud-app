@@ -453,103 +453,117 @@ elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
     if not clients.empty:
+        # 1. Selection UI
         col_search, col_mode = st.columns([2, 1])
         with col_search:
-            target = st.selectbox("Select Client", clients['client_name'].tolist())
+            client_list = clients['client_name'].tolist()
+            target = st.selectbox("Select Client", client_list)
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
 
-        c_info = clients[clients['client_name'] == target].iloc[0]
-        d_mark = float(c_info.get('daily_mark', 0.0))
-        c_id = c_info.get('client_id', 'N/A')
+        client_row = clients[clients['client_name'] == target].iloc[0]
+        d_mark = float(client_row.get('daily_mark', 0.0))
+        c_id = client_row.get('client_id', 'N/A')
         
-        # Data calculations
-        u_hist = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
-        total_bal = float(u_hist['amount'].sum()) if not u_hist.empty else 0.0
-        total_mks = int(u_hist['marks_covered'].sum()) if not u_hist.empty else 0
+        # --- DATA RETRIEVAL ---
+        user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
+        total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
+        total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
         
-        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {total_bal:,.2f} | 📅 *Marks:* {total_mks}")
+        st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
         st.divider()
 
-        ttype = st.radio("Action", ["Deposit", "Withdrawal"], horizontal=True)
-        
-        # FIX: Define variables at top level to avoid NameError
-        req_cash, db_amt, db_mks, db_fee = 0.0, 0.0, 0, 0.0
+        # --- 2. INITIALIZE VARIABLES (Prevents NameError) ---
+        ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
+        requested_cash = 0.0
+        db_amt = 0.0
+        db_marks = 0
+        db_fee = 0.0
 
         if ttype == "Deposit":
-            num_mks = st.number_input("Marks to add", min_value=1, step=1)
-            db_amt = float(num_mks * d_mark)
-            db_mks = int(num_mks)
-            st.info(f"➕ *Deposit:* GHS {db_amt:,.2f}")
-        else:
-            w_method = st.selectbox("Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission)"])
+            num_marks = st.number_input("Marks to add", min_value=1, step=1)
+            db_amt = float(num_marks * d_mark)
+            db_marks = int(num_marks)
+            st.info(f"➕ **Deposit:** GHS {db_amt:,.2f}")
             
-            # Max Cash Helper
+        else: # --- WITHDRAWAL LOGIC ---
+            w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
+            
+            # --- HELPER: CALCULATE MAX CASH ---
             if d_mark > 0:
                 if w_method == "Full Payout (Include Commission)":
-                    est_fee_mks = math.ceil(total_mks / 32)
-                    max_c = float((total_mks - est_fee_mks) * d_mark)
-                    st.success(f"💡 *Suggested Max Payout:* GHS {max_c:,.2f}")
+                    # Formula: Reserve 1 mark for every 31 marks of cash
+                    est_commissions = math.ceil(total_marks_saved / 32)
+                    max_cash_marks = max(0, total_marks_saved - est_commissions)
+                    max_cash_allowed = float(max_cash_marks * d_mark)
+                    st.success(f"💡 **Suggested Max Cash:** GHS {max_cash_allowed:,.2f}")
                 else:
-                    st.info(f"💡 *Available Balance:* GHS {total_bal:,.2f}")
+                    st.info(f"💡 **Available Balance:** GHS {total_saved_ghs:,.2f}")
 
-            req_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
+            requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
             
             if d_mark > 0:
-                mks_for_cash = int(req_cash / d_mark)
-                if w_method == "Full Payout (Include Commission)":
-                    num_comm = math.ceil(mks_for_cash / 31)
-                    db_fee = float(num_comm * d_mark)
-                    db_mks = -(mks_for_cash + num_comm)
-                else:
-                    db_fee = 0.0
-                    db_mks = -mks_for_cash
+                marks_for_cash = int(requested_cash / d_mark)
                 
-                db_amt = -float(req_cash + db_fee)
+                if w_method == "Full Payout (Include Commission)":
+                    # TIERED COMMISSION: 1-31 = 1 mark, 32-62 = 2 marks
+                    num_commissions = math.ceil(marks_for_cash / 31)
+                    db_fee = float(num_commissions * d_mark)
+                    db_marks = -(marks_for_cash + num_commissions)
+                else:
+                    # ADVANCE PAYMENT: Deduct marks for cash only.
+                    db_fee = 0.0
+                    db_marks = -marks_for_cash
+                
+                db_amt = -float(requested_cash + db_fee)
 
-            # --- VALIDATION (SAFE FROM NAMEERROR) ---
-            if req_cash > 0 or is_migration:
-                if total_mks < abs(db_mks):
-                    st.error("🚫 Insufficient Marks.")
-                    st.stop()
-                if abs(db_amt) > (total_bal + 0.01) and not is_migration:
-                    st.error("⚠️ Insufficient Balance.")
-                    st.stop()
+                # --- VALIDATION ---
+                if requested_cash > 0:
+                    if total_marks_saved < abs(db_marks):
+                        st.error(f"🚫 Insufficient Marks. Needed: {abs(db_marks)}, Have: {total_marks_saved}")
+                        st.stop()
+                    if abs(db_amt) > (total_saved_ghs + 0.01) and not is_migration:
+                        st.error("⚠️ Insufficient Balance to cover Cash + Fee.")
+                        st.stop()
+                    
+                    st.warning(f"📉 Total Deduction: GHS {abs(db_amt):,.2f} (Fee: {db_fee})")
 
-        if st.button("🚀 Confirm & Sync"):
-            new_record = {
-                'client_id': c_id,
+        # --- 3. SYNC & RECEIPT ---
+        if st.button("🚀 Confirm & Sync Transaction"):
+            new_entry = {
+                'client_id': str(c_id),
                 'client_name': target,
-                'amount': db_amt,
+                'amount': float(db_amt),
                 'date': datetime.now().isoformat(),
-                'fee': db_fee,
-                'marks_covered': db_mks
+                'fee': float(db_fee),
+                'marks_covered': int(db_marks)
             }
-            if sync_data_dual(new_record):
-                st.success("✅ Synced!")
-                # Thermal Receipt logic
-                receipt = f"""
-                <div style="font-family:monospace; border:1px solid #000; padding:10px; width:250px; background:white; color:black;">
-                    <center><h4>RUCHANET SUSU</h4></center>
+
+            if sync_data_dual(new_entry):
+                st.success("✅ Transaction Saved!")
+                
+                # Digital Receipt for Thermal Printer
+                receipt_html = f"""
+                <div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
+                    <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
                     <hr>
                     <b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
                     <b>Client:</b> {target}<br>
                     <b>ID:</b> {c_id}<br>
-                    -----------------------<br>
-                    <b>Amount:</b> GHS {abs(db_amt):,.2f}<br>
+                    ---------------------------<br>
+                    <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
                     <b>Fee:</b> GHS {db_fee:,.2f}<br>
-                    <b>Marks:</b> {db_mks}<br>
-                    -----------------------<br>
-                    <center><p style="font-size:10px;">Thank you!</p></center>
+                    <b>Marks:</b> {db_marks}<br>
+                    ---------------------------<br>
+                    <b>New Balance:</b> GHS {total_saved_ghs + db_amt:,.2f}
                 </div>
-                <button onclick="window.print()" style="width:100%; padding:10px; background:#FFD700; border:none; margin-top:5px; cursor:pointer;">🖨️ Print Receipt</button>
+                <button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
                 """
-                components.html(receipt, height=350)
+                components.html(receipt_html, height=400)
                 st.balloons()
                 time.sleep(1)
-                # Removed st.rerun() so receipt stays visible to print
     else:
-        st.warning("Register clients first.")                 
+        st.warning("Please register clients first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
@@ -727,27 +741,27 @@ elif choice == "🛠 Admin Tools":
                         st.error(f"🚨 Registration Failed: {e}")
 
     with t2:
-     st.subheader("📊 Weekly Executive Intelligence")
+        st.subheader("📊 Weekly Executive Intelligence")
     
-    # 1. Prepare the data (Fixes the .dt error)
-    if not contributions.empty:
-        contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
-    
-    # 2. The Manual Button
-    if st.button("🚀 Force Send Comprehensive Weekly Report"):
+            # 1. Prepare the data (Ensures date format is correct for the report)
         if not contributions.empty:
-            # This calls the function we moved to utils.py
-            with st.spinner("📧 Sending report now..."):
+         contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
+        
+             # UI Info for the Admin
+        st.info(f"💾 System ready: {len(contributions)} records scanned for intelligence.")
+        
+        # 2. The Manual Button
+        if st.button("🚀 Force Send Comprehensive Weekly Report"):
+            with st.spinner("📧 Preparing and sending report..."):
+                # This calls the function in your utils.py
                 if send_weekly_report(contributions, manual=True):
                     st.success("✅ Manual Report Sent Successfully!")
                 else:
                     st.error("❌ Failed to send. Check your Internet/Email settings.")
+    
         else:
-            st.warning("No data found to report on.")
-        
-        # Optional: Add a visual indicator if you have records
-        if not contributions.empty:
-            st.info(f"System ready: {len(contributions)} records scanned for intelligence.")
+         # This shows if the database is actually empty
+         st.warning("⚠️ No data found in the system to generate a report.")
 
     with t3:
         # 1. Health Check (Always at the top)
@@ -764,61 +778,62 @@ elif choice == "🛠 Admin Tools":
         st.divider()
 
         # 2. Reversal Logic
-        st.subheader("🛑 Restricted Data Cleanup")
-        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+st.subheader("🛑 Restricted Data Cleanup")
+admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+
+if admin_entry == st.secrets["passwords"]["admin_password"]:
+    if not contributions.empty:
+        search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
         
-        if admin_entry == st.secrets["passwords"]["admin_password"]:
-            if not contributions.empty:
-                search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
-                
-                # Filter the dataframe based on search
-                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
-                
-                if not f_df.empty:
-                    # Create the display string for the dropdown
-                    f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-                    
-                    to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
-                    
-                    if st.button("🔄 Authorize Professional Reversal"):
-                        try:
-                            # Extract the numeric ID
-                            selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
-                            # Get the specific row data
-                            target_row = f_df[f_df['id'] == selected_id].iloc[0]
+        # Filter the dataframe based on search
+        f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
+        
+        if not f_df.empty:
+            # Create the display string for the dropdown
+            f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
+            
+            to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
+            
+            if st.button("🔄 Authorize Professional Reversal"):
+                try:
+                    # Extract the numeric ID
+                    selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
+                    # Get the specific row data
+                    target_row = f_df[f_df['id'] == selected_id].iloc[0]
 
-                            # Create the "Mirror" entry (Negative values)
-                            reversal_entry = {
-                                'amount': -float(target_row['amount']),
-                                'client_name': target_row['client_name'],
-                                'date': datetime.now().isoformat(),
-                                'fee': 0.0,
-                                'marks_covered': -int(target_row['marks_covered']),
-                                'client_id': target_row.get('client_id', 'N/A')
-                            }
+                    # Create the "Mirror" entry (Negative values)
+                    # We flip the amount, marks, AND the fee to balance the books perfectly
+                    reversal_entry = {
+                        'amount': -float(target_row['amount']),
+                        'client_name': target_row['client_name'],
+                        'date': datetime.now().isoformat(),
+                        'fee': -float(target_row.get('fee', 0.0)),
+                        'marks_covered': -int(target_row['marks_covered']),
+                        'client_id': str(target_row.get('client_id', 'N/A'))
+                    }
 
-                            # Sync the reversal entry to the database
-                            if sync_data_dual(reversal_entry):
-                                with conn.session as s:
-                                    # Log the action in Audit Logs
-                                    s.execute(text("""
-                                        INSERT INTO audit_logs (action_type, details, admin_name) 
-                                        VALUES ('REVERSAL', :d, 'Manager')
-                                    """), {
-                                        "d": f"Professional Reversal of ID {selected_id} for {target_row['client_name']}"
-                                    })
-                                    s.commit()
-                                
-                                st.success(f"✅ Transaction balanced. A negative entry for GHS {target_row['amount']} was added.")
-                                st.cache_data.clear()
-                                time.sleep(1)
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"🚨 Reversal Failed: {e}")
-                else:
-                    st.info("No matching entries found.")
-            else:
-                st.info("No transactions available to reverse.") 
+                    # Sync the reversal entry to the database
+                    if sync_data_dual(reversal_entry):
+                        with conn.session as s:
+                            # Log the action in Audit Logs
+                            s.execute(text("""
+                                INSERT INTO audit_logs (action_type, details, admin_name) 
+                                VALUES ('REVERSAL', :d, 'Manager')
+                            """), {
+                                "d": f"Professional Reversal of ID {selected_id} for {target_row['client_name']}"
+                            })
+                            s.commit()
+                        
+                        st.success(f"✅ Transaction balanced. {target_row['client_name']} balance restored.")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"🚨 Reversal Failed: {e}")
+        else:
+            st.info("No matching entries found for this client.")
+    else:
+        st.info("The contributions database is currently empty.") 
 
     with t4:
         st.subheader("⚙️ Secure Client Profile Manager")

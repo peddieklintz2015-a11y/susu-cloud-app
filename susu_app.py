@@ -763,16 +763,16 @@ elif choice == "🛠 Admin Tools":
             st.warning("⚠️ No data found to report on.")
 
     # --- TAB 3: DATA CLEANUP (REVERSALS) ---
-    with t3:
-     st.subheader("🧹 Database Health & Reversals")
+with t3:
+    st.subheader("🧹 Database Health & Reversals")
     admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
 
     if admin_entry == st.secrets["passwords"]["admin_password"]:
         if not contributions.empty:
             # --- NEW: UNDO LOGIC ---
             st.markdown("### ⏪ Undo a Recent Reversal")
-            # We filter for 'REVERSAL' type to make sure we don't delete actual deposits
             rev_df = contributions[contributions['type'] == 'REVERSAL'].copy()
+            
             if not rev_df.empty:
                 rev_to_undo = st.selectbox("Select Reversal to REMOVE", rev_df['id'], 
                                             format_func=lambda x: f"ID:{x} | {rev_df[rev_df['id']==x]['client_name'].values[0]}")
@@ -790,7 +790,7 @@ elif choice == "🛠 Admin Tools":
             
             st.divider()
 
-            # --- ORIGINAL REVERSAL LOGIC (UNTOUCHED) ---
+            # --- ORIGINAL REVERSAL LOGIC ---
             st.markdown("### ➕ Perform New Reversal")
             search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
             f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
@@ -808,7 +808,7 @@ elif choice == "🛠 Admin Tools":
                             'amount': -float(target_row['amount']),
                             'client_name': target_row['client_name'],
                             'date': datetime.now().isoformat(),
-                            'type': 'REVERSAL', # Tagged for the undo filter above
+                            'type': 'REVERSAL',
                             'fee': -float(target_row.get('fee', 0.0)),
                             'marks_covered': -int(target_row['marks_covered']),
                             'client_id': str(target_row.get('client_id', 'N/A'))
@@ -833,9 +833,9 @@ elif choice == "🛠 Admin Tools":
         else:
             st.info("The contributions database is empty.")
 
-    # --- TAB 4: MANAGE PROFILE (THE FIX) ---
-    with t4:
-     st.subheader("⚙️ Secure Client Profile Manager")
+# --- TAB 4: MANAGE PROFILE (THE FIX) ---
+with t4:
+    st.subheader("⚙️ Secure Client Profile Manager")
     st.error("❗ Deletion removes the client and photo permanently.")
 
     if 'clients' in locals() and not clients.empty:
@@ -862,12 +862,12 @@ elif choice == "🛠 Admin Tools":
                 if photo_url and str(photo_url) not in ['None', 'nan', '']:
                     st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
             with col2:
-                st.write(f"*Name:* {c_data['client_name']}")
+                st.write(f"**Name:** {c_data['client_name']}")
                 st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
                 
-                # --- NEW: SOFT DISABLE OPTION ---
+                # Soft Disable Option
                 is_active = c_data.get('status', 'Active') == 'Active'
-                if st.button("🚫 Deactivate/Hide Profile" if is_active else "✅ Reactivate Profile"):
+                if st.button("🚫 Deactivate Profile" if is_active else "✅ Reactivate Profile"):
                     new_status = 'Inactive' if is_active else 'Active'
                     with conn.session as s:
                         s.execute(text("UPDATE clients SET status = :s WHERE client_id = :i"), {"s": new_status, "i": target_id})
@@ -878,7 +878,6 @@ elif choice == "🛠 Admin Tools":
 
             st.divider()
             
-            # --- ORIGINAL WIPE LOGIC (UNTOUCHED) ---
             confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
             
             if confirm_check:
@@ -888,14 +887,12 @@ elif choice == "🛠 Admin Tools":
                         try:
                             with st.spinner("Wiping..."):
                                 try:
-                                    # SUPABASE PHOTO REMOVAL
                                     safe_file = target_id.replace('/', '-')
                                     sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
                                 except Exception: 
                                     pass 
 
                                 with conn.session as s:
-                                    # PERMANENT DB REMOVAL
                                     s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()

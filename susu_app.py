@@ -489,7 +489,13 @@ elif choice == "💸 Transactions":
         else: # --- WITHDRAWAL LOGIC ---
             w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
             
-            # 1. Input for Cash
+            # Helper for the Agent
+            if d_mark > 0:
+                # Tell them the absolute max they can take if they pay commission now
+                est_comm_marks = math.ceil(total_marks_saved / 32)
+                max_cash_possible = float((total_marks_saved - est_comm_marks) * d_mark)
+                st.success(f"💡 Max Cash (with Commission): GHS {max_cash_possible:,.2f}")
+
             requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
             
             if d_mark > 0:
@@ -501,36 +507,37 @@ elif choice == "💸 Transactions":
                     db_fee = float(num_commissions * d_mark)
                     db_marks = -(marks_for_cash + num_commissions)
                 else:
-                    # Advance Payment: No fee recorded in DB
+                    # Advance Payment: 0 fee now, but we check if they HAVE it
                     db_fee = 0.0
                     db_marks = -marks_for_cash
                 
                 db_amt = -float(requested_cash + db_fee)
 
-                # --- 2. THE SHADOW CHECK (The "Bouncer" Logic) ---
-                # Even for Advance, we calculate what the fee WOULD be
-                shadow_commissions = math.ceil(marks_for_cash / 31)
-                total_required_marks = marks_for_cash + shadow_commissions
+                # --- THE BOUNCER CHECK (The Shadow Commission) ---
+                # We calculate what the fee WOULD be (1 mark for every 31)
+                shadow_fee_marks = math.ceil(marks_for_cash / 31)
+                total_marks_needed_to_be_safe = marks_for_cash + shadow_fee_marks
                 
                 if requested_cash > 0:
-                    # We check against total_required_marks even if db_marks is smaller
-                    if total_marks_saved < total_required_marks:
-                        st.error(f"🚫 Insufficient Funds for future Commission. "
-                                 f"You need {total_required_marks} marks total to cover this cash plus its commission, "
-                                 f"but you only have {total_marks_saved}.")
+                    # BLOCK if they don't have enough marks to cover cash + the "shadow" fee
+                    if total_marks_saved < total_marks_needed_to_be_safe:
+                        st.error("🚫 **Insufficient Reserved Marks.**")
+                        st.write(f"To take GHS {requested_cash:,.2f}, the client needs **{total_marks_needed_to_be_safe} marks** "
+                                 f"(Cash: {marks_for_cash} + Commission: {shadow_fee_marks}).")
+                        st.write(f"Current Balance: **{total_marks_saved} marks**.")
                         st.stop()
                     
-                    # Standard balance check for the actual transaction
+                    # BLOCK if they don't have the actual cash balance (for migrations/over-withdrawals)
                     if abs(db_amt) > (total_saved_ghs + 0.01) and not is_migration:
-                        st.error("⚠️ Insufficient Cash Balance.")
+                        st.error(f"⚠️ **Insufficient Cash Balance.** Balance: GHS {total_saved_ghs:,.2f}")
                         st.stop()
                     
-                    # UI feedback
+                    # UI Final Confirmation
                     if w_method == "Advance Payment (No Commission Now)":
-                        st.warning(f"ℹ️ Advance Mode: Deducting {marks_for_cash} marks. "
-                                   f"Commission of {shadow_commissions} marks is reserved and must be paid later.")
+                        st.warning(f"ℹ️ **Advance Mode**: Deducting {marks_for_cash} marks. "
+                                   f"{shadow_fee_marks} marks are reserved in the account for future commission.")
                     else:
-                        st.warning(f"📉 Total Deduction: GHS {abs(db_amt):,.2f} (Includes Fee: {db_fee})")
+                        st.warning(f"📉 **Full Payout**: Total Deduction GHS {abs(db_amt):,.2f} (Fee: {db_fee})")
 
         # --- 3. SYNC & RECEIPT ---
         if st.button("🚀 Confirm & Sync Transaction"):

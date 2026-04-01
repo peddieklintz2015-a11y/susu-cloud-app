@@ -588,23 +588,18 @@ elif choice == "💸 Transactions":
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
     
-    # --- DEEP REFRESH & ERROR HANDLING ---
+    # --- DEEP REFRESH & CACHE BUSTING ---
     import uuid
     query_id = str(uuid.uuid4()) 
     
     try:
-        # ttl=0 and unique query_id forces the database to ignore the cache
+        # Fetching fresh data directly
         contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
         clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
     except Exception as e:
         st.error(f"🚨 Live Data Sync Failed: {e}")
         st.stop()
 
-    # --- SIDEBAR REFRESH ---
-    if st.sidebar.button("🔄 Force System Refresh"):
-        st.cache_data.clear()
-        st.rerun()
-        
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if 'clients' in locals() and not clients.empty:
@@ -614,101 +609,91 @@ elif choice == "📑 Digital Passbook":
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = clients[clients['client_name'] == target].iloc[0]
             
-            # --- AGGREGATE DATA WITH CLEANING ---
+            # --- AGGREGATE DATA & DATE/TIME RECOVERY ---
             user_history = pd.DataFrame()
             if 'contributions' in locals() and not contributions.empty:
-                # CLEANING: 'errors=coerce' prevents the ValueError seen in your screenshot
-                contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
+                df_temp = contributions[contributions['client_name'] == target].copy()
                 
-                user_history = contributions[contributions['client_name'] == target].copy()
+                # IMPROVED DATE/TIME PARSER
+                def parse_date_with_time(date_val):
+                    if pd.isna(date_val) or date_val == "":
+                        return None
+                    # Try timestamp first, then plain date
+                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M', '%Y-%m-%d'):
+                        try:
+                            return pd.to_datetime(date_val, format=fmt)
+                        except (ValueError, TypeError):
+                            continue
+                    return pd.to_datetime(date_val, errors='coerce')
+
+                df_temp['date'] = df_temp['date'].apply(parse_date_with_time)
                 
-                # Filter out any rows where the amount or marks might be NaN
-                total_marks = int(user_history['marks_covered'].fillna(0).sum())
-                current_balance = float(user_history['amount'].fillna(0).sum())
-                
-                # Sort by date (NaT values will go to the bottom)
-                user_history = user_history.sort_values(by='date', ascending=False)
+                total_marks = int(df_temp['marks_covered'].fillna(0).sum())
+                current_balance = float(df_temp['amount'].fillna(0).sum())
+                # Sort by date and time
+                user_history = df_temp.sort_values(by='date', ascending=False)
             else:
                 total_marks = 0
                 current_balance = 0.0
             
-            # --- UI PROFILE DISPLAY ---
-            col_a, col_b = st.columns([1, 2])
-            with col_a:
-                photo = c_info.get('photo_url')
-                if photo and str(photo) not in ['None', 'nan', '']:
-                    st.image(photo, use_container_width=True)
-            
-            with col_b:
-                st.subheader(f"User: {target}")
-                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
-                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
-                
-                m1, m2, m3 = st.columns(3)
-                m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
-                m2.metric("📅 Total Marks", f"{total_marks}")
-                m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
+            # --- UI METRICS ---
+            m1, m2, m3 = st.columns(3)
+            m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
+            m2.metric("📅 Total Marks", f"{total_marks}")
+            m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
 
             st.divider()
             
-            # --- TRANSACTION HISTORY & RECEIPT ---
+            # --- TRANSACTION HISTORY ---
             st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    # Handle display of potentially broken dates safely
+                    # Format for display: 2026-04-01 04:14
                     if pd.isna(row['date']):
-                        t_date = "Unknown Date"
+                        t_date_str = "Unknown Date/Time"
                     else:
-                        t_date = row['date'].strftime('%Y-%m-%d %H:%M')
+                        t_date_str = row['date'].strftime('%Y-%m-%d %H:%M')
                         
                     t_amt = float(row['amount'])
                     t_type = "Deposit" if t_amt > 0 else "Withdrawal"
                     
-                    with st.expander(f"{t_date} | {t_type} | GHS {abs(t_amt):,.2f}"):
+                    with st.expander(f"{t_date_str} | {t_type} | GHS {abs(t_amt):,.2f}"):
                         col_text, col_print = st.columns([2, 1])
-                        
                         with col_text:
+                            st.write(f"**Exact Date/Time:** {t_date_str}")
                             st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
                             st.write(f"**Commission:** GHS {row.get('fee', 0.0):,.2f}")
 
                         with col_print:
-                            # Indentation fixed for VS Code / Ruff
+                            # Receipt using the full t_date_str
                             receipt_html = f"""
 <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 260px; padding: 10px; background: white; color: black; border: 1px solid #000;">
-    <center>
-        <h4 style="margin:0;">RUCHANET DAILY SUSU</h4>
-        <p style="font-size:10px;">Transaction Record</p>
-    </center>
+    <center><h4 style="margin:0;">RUCHANET SUSU</h4></center>
     <hr>
     <p style="font-size:12px;">
-        <b>Date:</b> {t_date}<br>
+        <b>Date/Time:</b> {t_date_str}<br>
         <b>Client:</b> {target}<br>
-        <b>ID:</b> {c_info.get('client_id')}<br>
-        <b>Daily Rate:</b> GHS {c_info.get('daily_mark', 0.0):,.2f}<br>
         <b>Type:</b> {t_type}<br>
         ----------------------------<br>
         <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
-        <b>Fee:</b> GHS {row.get('fee', 0.0):,.2f}<br>
         <b>Marks:</b> {row['marks_covered']}<br>
         ----------------------------<br>
-        <b>Verified Digital Record</b>
+        <b>Verified Record</b>
     </p>
 </div>
-<button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+<button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print</button>
 <script>
 function printDiv(divId) {{
     var printContents = document.getElementById(divId).innerHTML;
     var printWindow = window.open('', '', 'height=500,width=400');
-    printWindow.document.write('<html><body>');
-    printWindow.document.write(printContents);
-    printWindow.document.write('</body></html>');
+    printWindow.document.write('<html><body>' + printContents + '</body></html>');
     printWindow.document.close();
     printWindow.print();
 }}
 </script>
 """
-                            components.html(receipt_html, height=380)
+                            components.html(receipt_html, height=350)
             else:
                 st.info("No transaction history found.")
         else:

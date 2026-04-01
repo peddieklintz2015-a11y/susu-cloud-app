@@ -626,7 +626,7 @@ elif choice == "📑 Digital Passbook":
             with col_img:
                 p_url = c_info.get('photo_url')
                 if p_url and pd.notna(p_url):
-                    st.image(p_url, width=180)
+                    st.image(p_url, width=220)
                 else:
                     st.warning("👤 No Photo")
             

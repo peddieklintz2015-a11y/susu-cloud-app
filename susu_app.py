@@ -769,22 +769,33 @@ with t3:
 
     if admin_entry == st.secrets["passwords"]["admin_password"]:
         if not contributions.empty:
-            # --- SIMPLE UNDO: DELETE BY ID ---
+            # --- IMPROVED QUICK UNDO ---
             st.markdown("### ⏪ Quick Undo (Delete by ID)")
-            st.caption("Use this to permanently remove a mistaken entry (Deposit or Withdrawal).")
             
-            # Sort by ID to show the most recent transactions first
-            recent_ids = contributions.sort_values(by='id', ascending=False)['id'].head(5).tolist()
-            id_to_wipe = st.selectbox("Select ID to PERMANENTLY DELETE:", recent_ids)
+            # 1. We get the last 10 transactions
+            recent_data = contributions.sort_values(by='id', ascending=False).head(10)
             
-            if st.button("🗑️ Delete Entry & Fix Balance"):
+            # 2. Create a helper function to show more info in the dropdown
+            def format_undo_label(id_val):
+                row = recent_data[recent_data['id'] == id_val].iloc[0]
+                return f"ID: {id_val} | {row['date']} | {row['client_name']} | GHS {row['amount']}"
+
+            # 3. Show the dropdown with the new labels
+            id_to_wipe = st.selectbox(
+                "Select Transaction to PERMANENTLY DELETE:", 
+                options=recent_data['id'].tolist(),
+                format_func=format_undo_label,
+                key="undo_selector"
+            )
+            
+            if st.button("🗑️ Delete Entry & Fix Balance", type="secondary", use_container_width=True):
                 try:
                     with conn.session as s:
                         s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": id_to_wipe})
                         s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('MANUAL_DELETE', :d, 'Manager')"), 
                                   {"d": f"Deleted Transaction ID {id_to_wipe}"})
                         s.commit()
-                    st.success(f"✅ Transaction {id_to_wipe} removed. Dashboard updated!")
+                    st.success(f"✅ Transaction {id_to_wipe} deleted successfully!")
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:

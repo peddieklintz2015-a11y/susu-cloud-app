@@ -501,7 +501,7 @@ elif choice == "💸 Transactions":
                 max_cash_possible = float((total_marks_saved - est_comm_marks) * d_mark)
                 st.success(f"💡 Max Cash (with Commission): GHS {max_cash_possible:,.2f}")
 
-            requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
+            requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=float(d_mark))
             
             if d_mark > 0:
                 marks_for_cash = int(requested_cash / d_mark)
@@ -551,9 +551,10 @@ elif choice == "💸 Transactions":
                 }
 
                 if sync_data_dual(new_entry):
-                    st.success("✅ Transaction Saved!")
+                    st.success("✅ Transaction Successful!")
+                    st.balloons()
                     
-                    # Digital Receipt
+                    # Digital Receipt (Formatted for immediate display)
                     receipt_html = f"""
                     <div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
                         <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
@@ -571,14 +572,14 @@ elif choice == "💸 Transactions":
                     <button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
                     """
                     components.html(receipt_html, height=400)
-                    st.balloons()
-                    # CRITICAL: Wait slightly then rerun to force the page to update the balance
-                    time.sleep(3)
+                    
+                    # Clear cache and wait so user can see receipt before the page refreshes
+                    st.cache_data.clear()
+                    time.sleep(5) 
                     st.rerun()
 
         with col_refresh:
             if st.button("🔄 Sync & Refresh System", use_container_width=True):
-                # This clears cache (if you use it) and restarts the script
                 st.cache_data.clear()
                 st.rerun()
     else:
@@ -586,13 +587,23 @@ elif choice == "💸 Transactions":
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
-    # --- ADDED REFRESH BUTTON ---
-    if st.sidebar.button("🔄 Refresh Data"):
+    
+    # --- LIVE DATA REFRESH ---
+    # This pulls fresh data directly from your database using your existing conn object
+    try:
+        contributions = conn.query("SELECT * FROM contributions", ttl=0)
+        clients = conn.query("SELECT * FROM clients", ttl=0)
+    except Exception as e:
+        st.error(f"⚠️ Database Refresh Failed: {e}")
+
+    # --- SIDEBAR REFRESH ---
+    if st.sidebar.button("🔄 Force System Refresh"):
         st.cache_data.clear()
         st.rerun()
+        
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
-    if not clients.empty:
+    if 'clients' in locals() and not clients.empty:
         # Filter based on search input
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
         
@@ -602,7 +613,7 @@ elif choice == "📑 Digital Passbook":
             
             # --- AGGREGATE DATA ---
             user_history = pd.DataFrame()
-            if not contributions.empty and 'client_name' in contributions.columns:
+            if 'contributions' in locals() and not contributions.empty:
                 user_history = contributions[contributions['client_name'] == target].copy()
                 total_marks = int(user_history['marks_covered'].sum())
                 current_balance = float(user_history['amount'].sum())
@@ -623,7 +634,6 @@ elif choice == "📑 Digital Passbook":
                 st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
                 st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
                 
-                # METRICS ROW: Including the missing Daily Rate
                 m1, m2, m3 = st.columns(3)
                 m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
                 m2.metric("📅 Total Marks", f"{total_marks}")
@@ -631,11 +641,16 @@ elif choice == "📑 Digital Passbook":
 
             st.divider()
             
-            # --- TRANSACTION HISTORY & RECEIPT GENERATOR ---
+            # --- TRANSACTION HISTORY & RECEIPT ---
             st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    t_date = pd.to_datetime(row['date']).strftime('%Y-%m-%d %H:%M')
+                    # REPLACED BARE EXCEPT WITH SPECIFIC PANDAS DATE HANDLING
+                    try:
+                        t_date = pd.to_datetime(row['date']).strftime('%Y-%m-%d %H:%M')
+                    except (ValueError, TypeError):
+                        t_date = str(row['date'])
+                        
                     t_amt = float(row['amount'])
                     t_type = "Deposit" if t_amt > 0 else "Withdrawal"
                     
@@ -645,46 +660,44 @@ elif choice == "📑 Digital Passbook":
                         with col_text:
                             st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
-                            st.write(f"**Commission/Fee:** GHS {row.get('fee', 0.0):,.2f}")
+                            st.write(f"**Commission:** GHS {row.get('fee', 0.0):,.2f}")
 
                         with col_print:
-                            # THERMAL RECEIPT (Includes Daily Rate for transparency)
+                            # Corrected Indentation for HTML block
                             receipt_html = f"""
-                            <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 10px; background: white; color: black; border: 1px solid #000;">
-                                <center>
-                                    <h4 style="margin:0;">RUCHANET DAILY SUSU</h4>
-                                    <p style="font-size:10px;">Transaction Record</p>
-                                </center>
-                                <hr>
-                                <p style="font-size:12px;">
-                                    <b>Date:</b> {t_date}<br>
-                                    <b>Client:</b> {target}<br>
-                                    <b>ID:</b> {c_info.get('client_id')}<br>
-                                    <b>Daily Rate:</b> GHS {c_info.get('daily_mark', 0.0):,.2f}<br>
-                                    <b>Type:</b> {t_type}<br>
-                                    ----------------------------<br>
-                                    <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
-                                    <b>Fee:</b> GHS {row.get('fee', 0.0):,.2f}<br>
-                                    <b>Marks:</b> {row['marks_covered']}<br>
-                                    ----------------------------<br>
-                                    <b>Verified Digital Record</b>
-                                </p>
-                            </div>
-                            <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
-                            
-                            <script>
-                            function printDiv(divId) {{
-                                var printContents = document.getElementById(divId).innerHTML;
-                                var originalContents = document.body.innerHTML;
-                                var printWindow = window.open('', '', 'height=500,width=400');
-                                printWindow.document.write('<html><head><title>Print Receipt</title></head><body>');
-                                printWindow.document.write(printContents);
-                                printWindow.document.write('</body></html>');
-                                printWindow.document.close();
-                                printWindow.print();
-                            }}
-                            </script>
-                            """
+<div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 260px; padding: 10px; background: white; color: black; border: 1px solid #000;">
+    <center>
+        <h4 style="margin:0;">RUCHANET DAILY SUSU</h4>
+        <p style="font-size:10px;">Transaction Record</p>
+    </center>
+    <hr>
+    <p style="font-size:12px;">
+        <b>Date:</b> {t_date}<br>
+        <b>Client:</b> {target}<br>
+        <b>ID:</b> {c_info.get('client_id')}<br>
+        <b>Daily Rate:</b> GHS {c_info.get('daily_mark', 0.0):,.2f}<br>
+        <b>Type:</b> {t_type}<br>
+        ----------------------------<br>
+        <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
+        <b>Fee:</b> GHS {row.get('fee', 0.0):,.2f}<br>
+        <b>Marks:</b> {row['marks_covered']}<br>
+        ----------------------------<br>
+        <b>Verified Digital Record</b>
+    </p>
+</div>
+<button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+<script>
+function printDiv(divId) {{
+    var printContents = document.getElementById(divId).innerHTML;
+    var printWindow = window.open('', '', 'height=500,width=400');
+    printWindow.document.write('<html><body>');
+    printWindow.document.write(printContents);
+    printWindow.document.write('</body></html>');
+    printWindow.document.close();
+    printWindow.print();
+}}
+</script>
+"""
                             components.html(receipt_html, height=380)
             else:
                 st.info("No transaction history found.")

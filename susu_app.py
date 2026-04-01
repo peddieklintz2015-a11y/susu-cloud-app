@@ -674,12 +674,13 @@ elif choice == "📑 Digital Passbook":
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
-       # FIX: This line defines t4. Ensure it exists before "with t4:"
+    
+    # Initialize tabs
     t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
+    # --- TAB 1: REGISTRATION ---
     with t1:
         st.subheader("👤 Register New Client")
-        # Keep camera outside the form for stability
         photo = st.camera_input("Take Client Photo (Required)")
     
         with st.form("reg_form", clear_on_submit=True):
@@ -688,8 +689,6 @@ elif choice == "🛠 Admin Tools":
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
             reg_date = st.date_input("Registration Date", value=datetime.now())
             
-            # --- MANUAL ID OVERRIDE ---
-            # Suggest the next ID, but allow manual typing for old books
             suggested_id = get_next_gen_id(reg_date)
             manual_id = st.text_input("Confirm Client ID", value=suggested_id, help="Format: Number/MM/YY")
             
@@ -700,35 +699,24 @@ elif choice == "🛠 Admin Tools":
                     st.error("❌ Name, Phone, and Photo are all required.")
                 else:
                     try:
-                        # 1. Use the Manual ID if edited, otherwise the Suggested ID
                         final_id = manual_id.strip() if manual_id.strip() else suggested_id
-                        
-                        # 2. Create a safe filename (Slashes '/' break storage paths)
-                        # Example: "031/03/26" becomes "031-03-26.jpg"
                         safe_filename = f"{final_id.replace('/', '-')}.jpg"
                         
-                        # 3. Upload Photo to Supabase
                         sb_client.storage.from_("client-photos").upload(
                             path=safe_filename,
                             file=photo.getvalue(),
                             file_options={"content-type": "image/jpeg", "upsert": "true"}
                         )
 
-                        # 4. Construct Public URL
                         base_url = st.secrets['supabase_url']
                         p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
-                        # 5. Save to SQL Database
                         with conn.session as s:
                             s.execute(text("""
                                 INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                 VALUES (:i, :n, :p, :d, :u)
                             """), {
-                                "i": final_id, 
-                                "n": name.strip(), 
-                                "p": phone.strip(), 
-                                "d": daily, 
-                                "u": p_url
+                                "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
                             })
                             s.commit()
                         
@@ -736,272 +724,150 @@ elif choice == "🛠 Admin Tools":
                         st.balloons()
                         time.sleep(1)
                         st.rerun()
-
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
 
+    # --- TAB 2: REPORTS ---
     with t2:
         st.subheader("📊 Weekly Executive Intelligence")
-    
-            # 1. Prepare the data (Ensures date format is correct for the report)
         if not contributions.empty:
-         contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
-        
-             # UI Info for the Admin
-        st.info(f"💾 System ready: {len(contributions)} records scanned for intelligence.")
-        
-        # 2. The Manual Button
-        if st.button("🚀 Force Send Comprehensive Weekly Report"):
-            with st.spinner("📧 Preparing and sending report..."):
-                # This calls the function in your utils.py
-                if send_weekly_report(contributions, manual=True):
-                    st.success("✅ Manual Report Sent Successfully!")
-                else:
-                    st.error("❌ Failed to send. Check your Internet/Email settings.")
-    
+            contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
+            st.info(f"💾 System ready: {len(contributions)} records scanned.")
+            
+            if st.button("🚀 Force Send Comprehensive Weekly Report"):
+                with st.spinner("📧 Sending report..."):
+                    if send_weekly_report(contributions, manual=True):
+                        st.success("✅ Manual Report Sent!")
+                    else:
+                        st.error("❌ Failed to send. Check settings.")
         else:
-         # This shows if the database is actually empty
-         st.warning("⚠️ No data found in the system to generate a report.")
+            st.warning("⚠️ No data found to report on.")
 
+    # --- TAB 3: DATA CLEANUP (REVERSALS) ---
     with t3:
-        # 1. Health Check (Always at the top)
-        st.subheader("🧹 Database Health & Integrity")
-        if 'clients' in locals() and not clients.empty:
-            id_pattern = r'^\d{3}/\d{2}/\d{2}$'
-            invalid_ids = clients[~clients['client_id'].str.match(id_pattern, na=False)]
-            if not invalid_ids.empty:
-                st.error(f"⚠️ Found {len(invalid_ids)} IDs with incorrect formatting!")
-                st.dataframe(invalid_ids[['client_id', 'client_name', 'phone']])
-            else:
-                st.success("✅ All Client IDs follow the correct format.")
-        
-        st.divider()
-
-        # 2. Reversal Logic
-        st.subheader("🛑 Restricted Data Cleanup")
+        st.subheader("🧹 Database Health & Reversals")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
 
         if admin_entry == st.secrets["passwords"]["admin_password"]:
             if not contributions.empty:
-             search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
-        
-           # Filter the dataframe based on search
-        f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
-        
-        if not f_df.empty:
-            # Create the display string for the dropdown
-            f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-            
-            to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
-            
-            if st.button("🔄 Authorize Professional Reversal"):
-                try:
-                    # Extract the numeric ID
-                    selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
-                    # Get the specific row data
-                    target_row = f_df[f_df['id'] == selected_id].iloc[0]
+                search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
+                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
+                
+                if not f_df.empty:
+                    f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
+                    to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
+                    
+                    if st.button("🔄 Authorize Professional Reversal"):
+                        try:
+                            selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
+                            target_row = f_df[f_df['id'] == selected_id].iloc[0]
 
-                    # Create the "Mirror" entry (Negative values)
-                    # We flip the amount, marks, AND the fee to balance the books perfectly
-                    reversal_entry = {
-                        'amount': -float(target_row['amount']),
-                        'client_name': target_row['client_name'],
-                        'date': datetime.now().isoformat(),
-                        'fee': -float(target_row.get('fee', 0.0)),
-                        'marks_covered': -int(target_row['marks_covered']),
-                        'client_id': str(target_row.get('client_id', 'N/A'))
-                    }
+                            reversal_entry = {
+                                'amount': -float(target_row['amount']),
+                                'client_name': target_row['client_name'],
+                                'date': datetime.now().isoformat(),
+                                'fee': -float(target_row.get('fee', 0.0)),
+                                'marks_covered': -int(target_row['marks_covered']),
+                                'client_id': str(target_row.get('client_id', 'N/A'))
+                            }
 
-                    # Sync the reversal entry to the database
-                    if sync_data_dual(reversal_entry):
-                        with conn.session as s:
-                            # Log the action in Audit Logs
-                            s.execute(text("""
-                                INSERT INTO audit_logs (action_type, details, admin_name) 
-                                VALUES ('REVERSAL', :d, 'Manager')
-                            """), {
-                                "d": f"Professional Reversal of ID {selected_id} for {target_row['client_name']}"
-                            })
-                            s.commit()
-                        
-                        st.success(f"✅ Transaction balanced. {target_row['client_name']} balance restored.")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"🚨 Reversal Failed: {e}")
+                            if sync_data_dual(reversal_entry):
+                                with conn.session as s:
+                                    s.execute(text("""
+                                        INSERT INTO audit_logs (action_type, details, admin_name) 
+                                        VALUES ('REVERSAL', :d, 'Manager')
+                                    """), {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
+                                    s.commit()
+                                
+                                st.success("✅ Reversal Synced!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"🚨 Reversal Failed: {e}")
+                else:
+                    st.info("No matching entries found.")
             else:
-             st.info("No matching entries found for this client.")
-        else:
-         st.info("The contributions database is currently empty.") 
+                st.info("The contributions database is empty.")
 
+    # --- TAB 4: MANAGE PROFILE (THE FIX) ---
     with t4:
-     st.subheader("⚙️ Secure Client Profile Manager")
-    st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
+        st.subheader("⚙️ Secure Client Profile Manager")
+        st.error("❗ Deletion removes the client and photo permanently.")
 
-    # 1. Check if the clients table is defined and has data
-    if 'clients' in locals() and not clients.empty:
-        # Define search_query BEFORE filtering to avoid NameError
-        search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
-        
-        # Filter the clients dataframe based on search
-        filtered = clients[
-            clients['client_name'].str.contains(search_query, case=False) | 
-            clients['client_id'].astype(str).str.contains(search_query, case=False)
-        ]
-
-        if not filtered.empty:
-            selected_name = st.selectbox("Select Profile to Manage:", filtered['client_name'])
+        if 'clients' in locals() and not clients.empty:
+            search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
             
-            # Fetch specific client data
-            c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-            target_id = str(c_data['client_id']) 
-            
-            # --- SAFETY CALCULATION ---
-            final_balance = 0.0
-            u_history = pd.DataFrame() 
+            # Ensure the search logic is inside the 'if clients' block
+            filtered = clients[
+                clients['client_name'].str.contains(search_query, case=False) | 
+                clients['client_id'].astype(str).str.contains(search_query, case=False)
+            ]
 
-            if 'contributions' in locals() and not contributions.empty:
-                if 'client_name' in contributions.columns:
+            if not filtered.empty:
+                selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+                c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+                target_id = str(c_data['client_id']) 
+                
+                final_balance = 0.0
+                if 'contributions' in locals() and not contributions.empty:
                     u_history = contributions[contributions['client_name'] == selected_name]
                     final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
 
-            # --- DISPLAY PROFILE ---
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                photo_url = c_data.get('photo_url')
-                if photo_url and str(photo_url) not in ['None', 'nan', '']:
-                    st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
-                else:
-                    st.info("No Photo")
-            with col2:
-                st.write(f"**Name:** {c_data['client_name']}")
-                st.write(f"**Phone:** {c_data.get('phone', 'N/A')}")
-                st.write(f"**Daily Rate:** GHS {c_data.get('daily_mark', 0.0):,.2f}")
-                st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    photo_url = c_data.get('photo_url')
+                    if photo_url and str(photo_url) not in ['None', 'nan', '']:
+                        st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
+                with col2:
+                    st.write(f"**Name:** {c_data['client_name']}")
+                    st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
 
-            st.divider()
-            
-            # --- SECURITY CHECKPOINT ---
-            confirm_check = st.checkbox(f"⚠️ I confirm I want to wipe {selected_name} ({target_id}) forever.", key="del_check")
-            
-            if confirm_check:
-                admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
+                st.divider()
+                confirm_check = st.checkbox(f"⚠️ Confirm wipe for {selected_name}", key="del_check")
                 
-                if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                    if admin_pass == st.secrets["passwords"]["admin_password"]:
-                        try:
-                            with st.spinner("Wiping data..."):
-                                # 1. Cleanup Cloud Storage Photo
-                                try:
-                                    # Use the ID for filename safety
-                                    safe_filename = target_id.replace('/', '-')
-                                    sb_client.storage.from_("client-photos").remove([f"{safe_filename}.jpg"])
-                                except Exception:
-                                    pass 
+                if confirm_check:
+                    wipe_pass = st.text_input("🔐 Admin Password", type="password", key="wipe_pass_input")
+                    if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                        if wipe_pass == st.secrets["passwords"]["admin_password"]:
+                            try:
+                                with st.spinner("Wiping..."):
+                                    try:
+                                        safe_file = target_id.replace('/', '-')
+                                        sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
+                                    except Exception: 
+                                        pass 
 
-                                # 2. Database Cleanup (Cloud)
-                                with conn.session as s:
-                                    # Wipe contributions first (Foreign Key safety)
-                                    s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
-                                    # Wipe client record
-                                    s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
-                                    s.commit()
-
-                            st.success(f"🗑️ {selected_name} has been erased from history.")
-                            st.cache_data.clear() 
-                            time.sleep(2)
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"🚨 Wipe Failed: {e}")
-                    else:
-                        st.error("❌ Incorrect Admin Password.")
+                                    with conn.session as s:
+                                        s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                        s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                        s.commit()
+                                st.success("🗑️ Erased successfully.")
+                                st.cache_data.clear()
+                                time.sleep(1.5)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"🚨 Wipe Failed: {e}")
+            else:
+                st.info("No matching profiles.")
         else:
-            st.info("No matching profiles found.")
-    else:
-        st.info("The client database is currently empty.")
+            st.info("Database empty.")
 
+    # --- TAB 5: RESET SYSTEM ---
     with t5:
-        st.header("🧨 Factory Reset & Security")
-        
-        # --- 1. SYSTEM WIPE LOGIC ---
-        st.subheader("🔥 Step 1: Wipe System")
-        st.error("WARNING: This action is permanent! It deletes all clients, photos, and money records.")
-        
-        confirm_reset = st.checkbox("I have backed up my data and want to delete EVERYTHING.", key="wipe_confirm_check")
+        st.header("🧨 Factory Reset")
+        confirm_reset = st.checkbox("I want to delete EVERYTHING.", key="wipe_confirm_check")
         
         if st.button("EXECUTE FULL RESET", type="primary", disabled=not confirm_reset):
             try:
                 with conn.session as s:
-                    # Reset tables and ID counters
                     s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
                     s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
-                    # Log the reset action itself before wiping the logs
                     s.execute(text("TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;"))
-                    s.execute(text("""
-                        INSERT INTO audit_logs (action_type, details, admin_name) 
-                        VALUES ('SYSTEM_RESET', 'Full factory reset performed.', 'System Admin')
-                    """))
                     s.commit()
-                
-                # Clear Supabase Storage
-                try:
-                    files = sb_client.storage.from_("client-photos").list()
-                    if files:
-                        file_names = [f['name'] for f in files if f['name'] != '.emptyKeepFile']
-                        if file_names:
-                            sb_client.storage.from_("client-photos").remove(file_names)
-                except Exception:
-                    pass 
-
-                st.success("💥 System wiped successfully!")
+                st.success("💥 System wiped!")
                 st.cache_data.clear()
-                time.sleep(2)
+                time.sleep(1.5)
                 st.rerun()
-                
             except Exception as e:
-                # FIX: Using 'e' here removes the VS Code warning
                 st.error(f"Reset failed: {e}")
-
-        st.divider()
-
-        # --- 2. SECURITY AUDIT & HISTORY ---
-        st.subheader("🛡️ Security Audit & History")
-        
-        # Display Last Reset Date
-        try:
-            reset_info = conn.query("SELECT created_at FROM audit_logs WHERE action_type = 'SYSTEM_RESET' ORDER BY created_at DESC LIMIT 1")
-            if not reset_info.empty:
-                last_reset = pd.to_datetime(reset_info.iloc[0]['created_at']).strftime('%B %d, %Y at %H:%M')
-                st.info(f"📅 **Current Cycle Started:** {last_reset}")
-            else:
-                st.info("📅 **Current Cycle:** No reset recorded yet.")
-        except Exception as e:
-            st.error(f"Could not fetch cycle history: {e}")
-
-        if st.button("📋 View Recent Admin Actions"):
-            try:
-                audit_query = "SELECT created_at, action_type, details FROM audit_logs ORDER BY created_at DESC LIMIT 15"
-                logs_df = conn.query(audit_query)
-                if not logs_df.empty:
-                    logs_df['created_at'] = pd.to_datetime(logs_df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
-                    st.table(logs_df)
-                else:
-                    st.write("No logs found.")
-            except Exception as e:
-                st.error(f"Log error: {e}")
-        st.subheader("sqlite Local Database Viewer")
-    if st.button("📂 Load Local DB Records"):
-        try:
-            conn_local = sqlite3.connect('susu_data.db')
-            local_df = pd.read_sql_query("SELECT * FROM contributions", conn_local)
-            conn_local.close()
-            
-            if not local_df.empty:
-                st.write(f"Total Local Records: {len(local_df)}")
-                st.dataframe(local_df, use_container_width=True)
-            else:
-                st.info("The local database is empty.")
-        except Exception as e:
-            st.error(f"Could not read local DB: {e}")

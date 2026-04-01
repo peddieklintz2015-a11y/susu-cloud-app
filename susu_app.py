@@ -6,7 +6,6 @@ import sqlite3
 import time
 import re
 import math
-import pytz
 from datetime import datetime
 from sqlalchemy import text
 from supabase import create_client
@@ -231,12 +230,15 @@ def draw_sidebar_log(df):
             else:
                 st.info("No activity yet.")
 
-def generate_susu_receipt(idx, date_obj, client_name, amount, marks, bal_after=None):
-    # Convert the date object to a nice string for the HTML
-    date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+def generate_susu_receipt(idx, date_val, client_name, amount, marks, bal_after=None):
+    # Handle both datetime objects and strings safely
+    if isinstance(date_val, datetime):
+        date_display = date_val.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        date_display = str(date_val)
+        
     t_type_label = "DEPOSIT" if amount > 0 else "WITHDRAWAL"
     
-    # If we don't pass a balance (like in simple history), we hide those rows
     bal_html = ""
     if bal_after is not None:
         bal_before = float(bal_after - amount)
@@ -254,7 +256,7 @@ def generate_susu_receipt(idx, date_obj, client_name, amount, marks, bal_after=N
         </center>
         <hr style="border-top: 1px dashed #000;">
         <div style="font-size:12px;">
-            <b>Date/Time:</b> {date_str}<br>
+            <b>Date/Time:</b> {date_display}<br>
             <b>Client:</b> {client_name}<br>
             <b>Type:</b> {t_type_label}<br>
         </div>
@@ -268,7 +270,7 @@ def generate_susu_receipt(idx, date_obj, client_name, amount, marks, bal_after=N
             {bal_html}
         </table>
         <hr style="border-top: 1px dashed #000;">
-        <center><p style="font-size:13px;"><span style="font-style: italic;">Thank you for saving with RUCHANET SUSU!</span><br>Verified Digital Record</p></center>
+        <center><p style="font-size:12px;"><span style="font-style: italic;">Thank you for saving with RUCHANET SUSU!</span><br>Verified Digital Record</p></center>
     </div>
     <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:8px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
     <script>
@@ -505,73 +507,58 @@ if choice == "📊 Dashboard":
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
-    # --- 1. SELECTION & MIGRATION UI ---
     if not clients.empty:
-        col_search, col_mode, col_date = st.columns([2, 1, 1])
+        # --- FIX: Added col_refresh to this line ---
+        col_search, col_mode, col_date, col_refresh = st.columns([2, 1, 1, 1])
         
         with col_search:
-            client_list = clients['client_name'].tolist()
-            target = st.selectbox("Select Client", client_list)
-        
+            target = st.selectbox("Select Client", clients['client_name'].tolist())
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
-        
         with col_date:
             if is_migration:
-                # Capture the date from the widget
-                selected_date = st.date_input("Transaction Date", value=datetime.now().date())
-                # COMBINE with current time to create the fix for your backdating
-                final_timestamp = datetime.combine(selected_date, datetime.now().time())
+                sel_date = st.date_input("Transaction Date", value=datetime.now().date())
+                final_timestamp = datetime.combine(sel_date, datetime.now().time())
             else:
-                # Standard mode uses the actual current time
                 final_timestamp = datetime.now()
                 st.info(f"Date: {final_timestamp.strftime('%Y-%m-%d')}")
+        
+        # --- NEW: Logic for the Refresh Button ---
+        with col_refresh:
+            st.write("") # Padding for alignment
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
 
-        # All the following code MUST stay indented under 'if not clients.empty:'
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
         c_id = client_row.get('client_id', 'N/A')
         
-        # --- DATA RETRIEVAL ---
         user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
         total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
         total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
         
-        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {total_saved_ghs:,.2f} | 📅 *Total Marks:* {total_marks_saved}")
+        st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
         st.divider()
 
-        # --- 2. INITIALIZE VARIABLES ---
         ttype = st.radio("Transaction Type", ["Deposit", "Withdrawal"], horizontal=True)
-        requested_cash = 0.0
-        db_amt = 0.0
-        db_marks = 0
-        db_fee = 0.0
+        db_amt, db_marks, db_fee = 0.0, 0, 0.0
 
         if ttype == "Deposit":
             num_marks = st.number_input("Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
             db_marks = int(num_marks)
-            st.info(f"➕ *Deposit:* GHS {db_amt:,.2f}")
-            
-        else: # --- WITHDRAWAL LOGIC ---
+            st.info(f"➕ **Deposit:** GHS {db_amt:,.2f}")
+        else:
             w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
-            
-            if d_mark > 0:
-                est_comm_marks = math.ceil(total_marks_saved / 32)
-                max_cash_possible = float((total_marks_saved - est_comm_marks) * d_mark)
-                st.success(f"💡 Max Cash (with Commission): GHS {max_cash_possible:,.2f}")
-
             requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=float(d_mark))
             
-            if d_mark > 0:
-                # --- NEW STRICT VALIDATION: MULTIPLE CHECK ---
-                if requested_cash > 0 and (requested_cash % d_mark) != 0:
-                    st.error(f"🚫 **Invalid Amount:** GHS {requested_cash:,.2f} is not a multiple of the Daily Rate (GHS {d_mark:,.2f}).")
-                    st.info(f"Accepted amounts: {d_mark}, {d_mark*2}, {d_mark*3}, etc.")
-                    st.stop() 
+            if requested_cash > 0:
+                if (requested_cash % d_mark) != 0:
+                    st.error(f"🚫 Not a multiple of GHS {d_mark}")
+                    st.stop()
                 
                 marks_for_cash = int(requested_cash / d_mark)
-                
                 if w_method == "Full Payout (Include Commission)":
                     num_commissions = math.ceil(marks_for_cash / 31)
                     db_fee = float(num_commissions * d_mark)
@@ -582,174 +569,100 @@ elif choice == "💸 Transactions":
                 
                 db_amt = -float(requested_cash + db_fee)
 
-                shadow_fee_marks = math.ceil(marks_for_cash / 31)
-                total_marks_needed_to_be_safe = marks_for_cash + shadow_fee_marks
-                
-                if requested_cash > 0:
-                    if not is_migration:
-                        if total_marks_saved < total_marks_needed_to_be_safe:
-                            st.error("🚫 **Insufficient Reserved Marks.**")
-                            st.stop()
-                        
-                        if abs(db_amt) > (total_saved_ghs + 0.01):
-                            st.error("⚠️ **Insufficient Cash Balance.**")
-                            st.stop()
-                    
-                    if w_method == "Advance Payment (No Commission Now)":
-                        st.warning(f"ℹ️ **Advance Mode**: Deducting {marks_for_cash} marks.")
-                    else:
-                        st.warning(f"📉 **Full Payout**: Total Deduction GHS {abs(db_amt):,.2f}")
+                if not is_migration:
+                    required_marks = abs(db_marks) 
+                    if total_marks_saved < required_marks:
+                        st.error(f"🚫 Insufficient Marks. Need {required_marks}, have {total_marks_saved}")
+                        st.stop()
+                    if abs(db_amt) > (total_saved_ghs + 0.01):
+                        st.error("⚠️ Insufficient Cash Balance.")
+                        st.stop()
 
-        # --- 3. SYNC & RECEIPT (Now properly indented) ---
         st.divider()
-        col_confirm, col_refresh = st.columns(2)
-
-        with col_confirm:
-            if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
-                import pytz
-                from datetime import datetime
-                ghana_tz = pytz.timezone('Africa/Accra')
-                now_ghana = datetime.now(ghana_tz)
-                
-                new_entry = {
-                    'client_id': str(c_id),
-                    'client_name': target,
-                    'amount': float(db_amt),
-                    'date': now_ghana.strftime('%Y-%m-%d %H:%M:%S'),
-                    'fee': float(db_fee),
-                    'marks_covered': int(db_marks)
-                }
-
-                if sync_data_dual(new_entry):
-                    st.success(f"✅ Transaction Synced at {now_ghana.strftime('%H:%M:%S')}!")
-                    st.balloons()
-                    
-                    t_date_str = now_ghana.strftime('%Y-%m-%d %H:%M')
-                    
-                    # Call the function 
-                    generate_susu_receipt(
-                        idx=now_ghana.strftime('%H%M%S'), 
-                        date_str=t_date_str, 
-                        client_name=target, 
-                        amount=float(db_amt), 
-                        marks=int(db_marks), 
-                        bal_after=float(total_saved_ghs + db_amt)
-                    )
-                    
-                    st.cache_data.clear()
-                    import time
-                    time.sleep(7) 
-                    st.rerun()
-
-        with col_refresh:
-            if st.button("🔄 Sync & Refresh System", use_container_width=True):
+        if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
+            new_entry = {
+                'client_id': str(c_id), 'client_name': target, 'amount': db_amt,
+                'date': final_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                'fee': db_fee, 'marks_covered': db_marks
+            }
+            if sync_data_dual(new_entry):
+                st.success("✅ Transaction Synced!")
+                generate_susu_receipt(idx="new", date_val=final_timestamp, client_name=target, amount=db_amt, marks=db_marks, bal_after=total_saved_ghs+db_amt)
                 st.cache_data.clear()
+                time.sleep(5)
                 st.rerun()
+
     else:
         st.warning("Please register clients first.")                 
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
     
-    # --- DEEP REFRESH & CACHE BUSTING ---
     import uuid
-    query_id = str(uuid.uuid4()) 
+    query_id = str(uuid.uuid4())
     
-    try:
-        contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
-        clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
-    except Exception as e:
-        st.error(f"🚨 Live Data Sync Failed: {e}")
-        st.stop()
+    # Refresh data from Supabase
+    clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
+    contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
 
-    search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
+    search = st.text_input("🔍 Search Client Name", key="passbook_search")
     
-    if 'clients' in locals() and not clients.empty:
+    if not clients.empty:
         filtered = clients[clients['client_name'].str.contains(search, case=False)] if search else clients
         
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = filtered[filtered['client_name'] == target].iloc[0]
             
-            # --- 1. SUPABASE PHOTO DISPLAY ---
-            # Replace 'YOUR_PROJECT_REF' with your actual Supabase Project ID (e.g., peddieklintz...)
-            project_id = "peddieklintz2015-a11y" 
-            bucket_name = "client-photos"
-            
+            # --- PHOTO DISPLAY ---
             col_img, col_details = st.columns([1, 3])
-            
             with col_img:
-                # Check if the 'image' column has the filename (e.g., "client_123.png")
-                image_filename = c_info.get('image')
-                if image_filename and pd.notna(image_filename):
-                    # Construct the public URL for Supabase Storage
-                    img_url = f"https://{project_id}.supabase.co/storage/v1/object/public/{bucket_name}/{image_filename}"
-                    st.image(img_url, width=150, use_container_width=False)
+                p_url = c_info.get('photo_url')
+                if p_url and pd.notna(p_url):
+                    st.image(p_url, width=150)
                 else:
-                    # Fallback icon if no image exists
-                    st.write("👤 No Photo")
+                    st.warning("👤 No Photo")
             
             with col_details:
-                st.subheader(f"{target}")
+                st.subheader(target)
                 st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
-                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
+                st.write(f"📞 **Contact:** {c_info.get('phone', 'N/A')}")
 
-            # --- 2. AGGREGATE DATA ---
-            user_history = pd.DataFrame()
-            if 'contributions' in locals() and not contributions.empty:
-                df_temp = contributions[contributions['client_name'] == target].copy()
-                
-                def parse_date_with_time(date_val):
-                    if pd.isna(date_val) or date_val == "":
-                        return None
-                    formats = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M', '%Y-%m-%d')
-                    for fmt in formats:
-                        try: 
-                            return pd.to_datetime(date_val, format=fmt)
-                        except(ValueError, TypeError):
-                            continue
-                    return pd.to_datetime(date_val, errors='coerce')
-
-                df_temp['date'] = df_temp['date'].apply(parse_date_with_time)
-                total_marks = int(df_temp['marks_covered'].fillna(0).sum())
-                current_balance = float(df_temp['amount'].fillna(0).sum())
-                user_history = df_temp.sort_values(by='date', ascending=False)
-            else:
-                total_marks = 0
-                current_balance = 0.0
+            # --- HISTORY AGGREGATION ---
+            user_history = contributions[contributions['client_name'] == target].copy()
             
-            # --- 3. UI METRICS ---
-            m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
-            m2.metric("📅 Total Marks", f"{total_marks}")
-            m3.metric("💳 Daily Rate", f"GHS {c_info.get('daily_mark', 0.0):,.2f}")
-
-            st.divider()
-            
-            # --- 4. TRANSACTION HISTORY & RECEIPT FIX ---
-            st.subheader("📜 Recent Activity")
             if not user_history.empty:
+                # FIXED: Specific exception type to remove "Bare Except" warning
+                def safe_parse(d):
+                    try: 
+                        return pd.to_datetime(d)
+                    except Exception: 
+                        return pd.to_datetime(d, errors='coerce')
+                
+                user_history['date'] = user_history['date'].apply(safe_parse)
+                user_history = user_history.sort_values(by='date', ascending=False)
+                
+                m1, m2 = st.columns(2)
+                current_bal = user_history['amount'].sum()
+                m1.metric("💰 Current Balance", f"GHS {current_bal:,.2f}")
+                m2.metric("📅 Total Marks", f"{int(user_history['marks_covered'].sum())}")
+                st.divider()
+
                 for idx, row in user_history.iterrows():
-                    t_date_str = row['date'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['date']) else "Unknown"
-                    t_amt = float(row['amount'])
-                    t_type = "Deposit" if t_amt > 0 else "Withdrawal"
-                    
-                    with st.expander(f"{t_date_str} | {t_type} | GHS {abs(t_amt):,.2f}"):
-                        col_text, col_print = st.columns([2, 1])
-                        with col_text:
-                            st.write(f"**Marks:** {row['marks_covered']}")
+                    t_label = f"{row['date'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['date']) else 'Unknown'} | GHS {abs(row['amount']):,.2f}"
+                    with st.expander(t_label):
+                        st.write(f"**Marks Covered:** {row['marks_covered']}")
                         
-                        with col_print:
-                            # Use st.markdown to render the HTML returned by your function
-                            receipt_html = generate_susu_receipt(
-                                idx=idx, 
-                                date_str=t_date_str, 
-                                client_name=target, 
-                                amount=t_amt, 
-                                marks=row['marks_covered'],
-                                bal_after=None
-                            )
-                            st.markdown(receipt_html, unsafe_allow_html=True)
+                        # --- RECEIPT CALL ---
+                        # Matches: idx, date_str, client_name, amount, marks, bal_after
+                        generate_susu_receipt(
+                            idx=idx, 
+                            date_val=row['date'], 
+                            client_name=target, 
+                            amount=row['amount'], 
+                            marks=row['marks_covered'],
+                            bal_after=None 
+                        )
             else:
                 st.info("No transaction history found.")
         else:

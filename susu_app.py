@@ -74,23 +74,23 @@ def sync_data_dual(new_record):
     # Only one return at the very bottom so all code above is executed.
     return success_local and success_cloud
 
-# --- PWA CONFIGURATION ---
-def pwa_support():
-    # Everything must be indented inside the function
-    components.html("""
-        <script>
-            if ('serviceWorker' in navigator) {
-              window.addEventListener('load', function() {
-                navigator.serviceWorker.register('./sw.js').then(reg => {
-                  console.log('PWA Registered');
-                });
-              });
-            }
-        </script>
-    """, height=0)
-
-# CRITICAL: You must call the function for it to run!
-pwa_support()
+# --- GLOBAL PWA INJECTION ---
+# Place this right after your imports and set_page_config
+st.markdown(
+    """
+    <link rel="manifest" href="./manifest.json">
+    <script>
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('./sw.js').then(function(reg) {
+              console.log('PWA ServiceWorker registered');
+            });
+          });
+        }
+    </script>
+    """, 
+    unsafe_allow_html=True
+)
 
 # This line enures 're' is seen as used without causing a syntax warning
 re_tool = re.compile(r'.*')
@@ -665,12 +665,22 @@ elif choice == "📑 Digital Passbook":
 elif choice == "🛠 Admin Tools":
     st.title("🛠 Admin Dashboard")
     
-    # Initialize tabs
     t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
     # --- TAB 1: REGISTRATION ---
     with t1:
         st.subheader("👤 Register New Client")
+        
+        # --- NEW: SCREEN LIGHT TOGGLE ---
+        use_screen_light = st.toggle("💡 Toggle Screen Light (for dark areas)")
+        if use_screen_light:
+            st.markdown(
+                "<style>.stApp { background-color: white !important; color: black !important; }</style>",
+                unsafe_allow_html=True
+            )
+            st.info("🔦 Screen Light Active: Use this to illuminate faces in the dark.")
+
+        # Camera is outside the form for better performance
         photo = st.camera_input("Take Client Photo (Required)")
     
         with st.form("reg_form", clear_on_submit=True):
@@ -679,6 +689,7 @@ elif choice == "🛠 Admin Tools":
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
             reg_date = st.date_input("Registration Date", value=datetime.now())
             
+            # Use current logic for ID generation
             suggested_id = get_next_gen_id(reg_date)
             manual_id = st.text_input("Confirm Client ID", value=suggested_id, help="Format: Number/MM/YY")
             
@@ -690,8 +701,10 @@ elif choice == "🛠 Admin Tools":
                 else:
                     try:
                         final_id = manual_id.strip() if manual_id.strip() else suggested_id
+                        # Clean filename for Supabase
                         safe_filename = f"{final_id.replace('/', '-')}.jpg"
                         
+                        # Upload to 'client-photos' bucket
                         sb_client.storage.from_("client-photos").upload(
                             path=safe_filename,
                             file=photo.getvalue(),
@@ -712,7 +725,7 @@ elif choice == "🛠 Admin Tools":
                         
                         st.success(f"✅ Registered {name} with ID: {final_id}")
                         st.balloons()
-                        time.sleep(4)
+                        time.sleep(2)
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")

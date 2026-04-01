@@ -769,40 +769,36 @@ with t3:
 
     if admin_entry == st.secrets["passwords"]["admin_password"]:
         if not contributions.empty:
-            # --- SAFETY CHECK FOR 'TYPE' COLUMN ---
-            if 'type' in contributions.columns:
-                st.markdown("### ⏪ Undo a Recent Reversal")
-                rev_df = contributions[contributions['type'] == 'REVERSAL'].copy()
-                
-                if not rev_df.empty:
-                    rev_to_undo = st.selectbox("Select Reversal to REMOVE", rev_df['id'], 
-                                                format_func=lambda x: f"ID:{x} | {rev_df[rev_df['id']==x]['client_name'].values[0]}")
-                    if st.button("🗑️ Delete Reversal & Restore Balance"):
-                        with conn.session as s:
-                            s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": rev_to_undo})
-                            s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('UNDO_REVERSAL', :d, 'Manager')"), 
-                                      {"d": f"Deleted Reversal ID {rev_to_undo}"})
-                            s.commit()
-                        st.success(f"✅ Reversal {rev_to_undo} removed. Data restored.")
-                        st.cache_data.clear()
-                        st.rerun()
-                else:
-                    st.info("No active reversals found to undo.")
-            else:
-                # If 'type' column doesn't exist, we skip the undo logic silently
-                st.warning("⚠️ Reversal Undo is unavailable because the 'type' column is missing from your database.")
+            # --- SIMPLE UNDO: DELETE BY ID ---
+            st.markdown("### ⏪ Quick Undo (Delete by ID)")
+            st.caption("Use this to permanently remove a mistaken entry (Deposit or Withdrawal).")
+            
+            # Sort by ID to show the most recent transactions first
+            recent_ids = contributions.sort_values(by='id', ascending=False)['id'].head(5).tolist()
+            id_to_wipe = st.selectbox("Select ID to PERMANENTLY DELETE:", recent_ids)
+            
+            if st.button("🗑️ Delete Entry & Fix Balance"):
+                try:
+                    with conn.session as s:
+                        s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": id_to_wipe})
+                        s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('MANUAL_DELETE', :d, 'Manager')"), 
+                                  {"d": f"Deleted Transaction ID {id_to_wipe}"})
+                        s.commit()
+                    st.success(f"✅ Transaction {id_to_wipe} removed. Dashboard updated!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
             
             st.divider()
 
-            # --- ORIGINAL REVERSAL LOGIC ---
-            st.markdown("### ➕ Perform New Reversal")
+            # --- ORIGINAL REVERSAL LOGIC (KEEPING AS COUNTER-ENTRY) ---
+            st.markdown("### ➕ Perform Professional Reversal")
+            st.info("This adds a negative entry to cancel out a transaction (keeping a paper trail).")
             search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
-            
-            # Filtering safety
             f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
             
             if not f_df.empty:
-                # We use .get() for fee to avoid more KeyErrors
                 f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
                 to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
                 
@@ -811,7 +807,7 @@ with t3:
                         selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
                         target_row = f_df[f_df['id'] == selected_id].iloc[0]
 
-                        # Prepare entry - note we only add 'type' if your sync_data_dual supports it
+                        # Create the counter-entry dictionary
                         reversal_entry = {
                             'amount': -float(target_row['amount']),
                             'client_name': target_row['client_name'],
@@ -820,29 +816,18 @@ with t3:
                             'marks_covered': -int(target_row['marks_covered']),
                             'client_id': str(target_row.get('client_id', 'N/A'))
                         }
-                        
-                        # Only add type if your table supports it
-                        if 'type' in contributions.columns:
-                            reversal_entry['type'] = 'REVERSAL'
 
                         if sync_data_dual(reversal_entry):
                             with conn.session as s:
-                                s.execute(text("""
-                                    INSERT INTO audit_logs (action_type, details, admin_name) 
-                                    VALUES ('REVERSAL', :d, 'Manager')
-                                """), {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
+                                s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('REVERSAL', :d, 'Manager')"), 
+                                          {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
                                 s.commit()
-                            
                             st.success("✅ Reversal Synced!")
                             st.cache_data.clear()
                             time.sleep(1.5)
                             st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Reversal Failed: {e}")
-            else:
-                st.info("No matching entries found.")
-        else:
-            st.info("The contributions database is empty.")
 
 # --- TAB 4: MANAGE PROFILE (THE FIX) ---
 with t4:

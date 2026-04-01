@@ -4,6 +4,7 @@ backgroundColor = "#0E1117" # A sleek dark background
 secondaryBackgroundColor = "#262730" # A lighter panel color
 textColor = "#FFFFFF" # White text for contrast
 font = "sans serif"
+base = "dark"
 
 [server]
 enableCORS = false

@@ -589,7 +589,7 @@ elif choice == "💸 Transactions":
                 st.success("✅ Transaction Synced!")
                 generate_susu_receipt(idx="new", date_val=final_timestamp, client_name=target, amount=db_amt, marks=db_marks, bal_after=total_saved_ghs+db_amt)
                 st.cache_data.clear()
-                time.sleep(5)
+                time.sleep(10)
                 st.rerun()
 
     else:
@@ -619,7 +619,7 @@ elif choice == "📑 Digital Passbook":
             with col_img:
                 p_url = c_info.get('photo_url')
                 if p_url and pd.notna(p_url):
-                    st.image(p_url, width=150)
+                    st.image(p_url, width=250)
                 else:
                     st.warning("👤 No Photo")
             
@@ -631,8 +631,10 @@ elif choice == "📑 Digital Passbook":
             # --- HISTORY AGGREGATION ---
             user_history = contributions[contributions['client_name'] == target].copy()
             
+            # Restoration of the Daily Rate variable
+            daily_rate = float(c_info.get('daily_mark', 0.0))
+            
             if not user_history.empty:
-                # FIXED: Specific exception type to remove "Bare Except" warning
                 def safe_parse(d):
                     try: 
                         return pd.to_datetime(d)
@@ -642,10 +644,14 @@ elif choice == "📑 Digital Passbook":
                 user_history['date'] = user_history['date'].apply(safe_parse)
                 user_history = user_history.sort_values(by='date', ascending=False)
                 
-                m1, m2 = st.columns(2)
+                # --- RESTORED METRICS BAR ---
+                m1, m2, m3 = st.columns(3)
                 current_bal = user_history['amount'].sum()
-                m1.metric("💰 Current Balance", f"GHS {current_bal:,.2f}")
-                m2.metric("📅 Total Marks", f"{int(user_history['marks_covered'].sum())}")
+                total_marks = int(user_history['marks_covered'].sum())
+                
+                m1.metric("💰 Balance", f"GHS {current_bal:,.2f}")
+                m2.metric("📅 Total Marks", f"{total_marks}")
+                m3.metric("📉 Daily Rate", f"GHS {daily_rate:,.2f}")
                 st.divider()
 
                 for idx, row in user_history.iterrows():
@@ -653,8 +659,7 @@ elif choice == "📑 Digital Passbook":
                     with st.expander(t_label):
                         st.write(f"**Marks Covered:** {row['marks_covered']}")
                         
-                        # --- RECEIPT CALL ---
-                        # Matches: idx, date_str, client_name, amount, marks, bal_after
+                        # Receipt call with fixed parameters
                         generate_susu_receipt(
                             idx=idx, 
                             date_val=row['date'], 
@@ -812,7 +817,7 @@ elif choice == "🛠 Admin Tools":
                                     s.commit()
                                 st.success("✅ Reversal Synced!")
                                 st.cache_data.clear()
-                                time.sleep(3)
+                                time.sleep(4)
                                 st.rerun()
                         except Exception as e:
                             st.error(f"🚨 Reversal Failed: {e}")
@@ -910,7 +915,7 @@ elif choice == "🛠 Admin Tools":
                         s.commit()
                     st.success("💥 System wiped successfully!")
                     st.cache_data.clear()
-                    time.sleep(5)
+                    time.sleep(6)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Reset failed: {e}")

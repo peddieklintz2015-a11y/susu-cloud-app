@@ -763,9 +763,9 @@ elif choice == "🛠 Admin Tools":
             st.warning("⚠️ No data found to report on.")
 
     # --- TAB 3: DATA CLEANUP (REVERSALS) ---
-with t3:
-    st.subheader("🧹 Database Health & Reversals")
-    admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+    with t3:
+        st.subheader("🧹 Database Health & Reversals")
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
 
     if admin_entry == st.secrets["passwords"]["admin_password"]:
         if not contributions.empty:
@@ -835,15 +835,15 @@ with t3:
                                 s.commit()
                             st.success("✅ Reversal Synced!")
                             st.cache_data.clear()
-                            time.sleep(1.5)
+                            time.sleep(2)
                             st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Reversal Failed: {e}")
 
-# --- TAB 4: MANAGE PROFILE (THE FIX) ---
-with t4:
-    st.subheader("⚙️ Secure Client Profile Manager")
-    st.error("❗ Deletion removes the client and photo permanently.")
+     # --- TAB 4: MANAGE PROFILE (THE FIX) ---
+    with t4:
+       st.subheader("⚙️ Secure Client Profile Manager")
+       st.error("❗ Deletion removes the client and photo permanently.")
 
     if 'clients' in locals() and not clients.empty:
         search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
@@ -922,7 +922,7 @@ with t4:
                     s.commit()
                 st.success("💥 System wiped!")
                 st.cache_data.clear()
-                time.sleep(1.5)
+                time.sleep(2)
                 st.rerun()
             except Exception as e:
                 st.error(f"Reset failed: {e}")

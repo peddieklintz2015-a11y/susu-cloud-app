@@ -11,7 +11,11 @@ from sqlalchemy import text
 from supabase import create_client
 
 # --- 1. SETUP ---
-st.set_page_config(page_title="RUCHANET DAILY SUSU", layout="wide")
+st.set_page_config(
+    page_title="RUCHANET DAILY SUSU",
+    page_icon="logo.png", # Points to your file in the GitHub folder
+    layout="wide"
+)
 
 # --- DATABASE CONNECTIONS & SYNC LOGIC ---
 conn = st.connection("postgresql", type="sql")

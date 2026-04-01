@@ -841,6 +841,7 @@ with t4:
     if 'clients' in locals() and not clients.empty:
         search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
         
+        # Correctly indented inside the Tab 4 block
         filtered = clients[
             clients['client_name'].str.contains(search_query, case=False) | 
             clients['client_id'].astype(str).str.contains(search_query, case=False)
@@ -862,22 +863,12 @@ with t4:
                 if photo_url and str(photo_url) not in ['None', 'nan', '']:
                     st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
             with col2:
-                st.write(f"**Name:** {c_data['client_name']}")
+                st.write(f"*Name:* {c_data['client_name']}")
                 st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
-                
-                # Soft Disable Option
-                is_active = c_data.get('status', 'Active') == 'Active'
-                if st.button("🚫 Deactivate Profile" if is_active else "✅ Reactivate Profile"):
-                    new_status = 'Inactive' if is_active else 'Active'
-                    with conn.session as s:
-                        s.execute(text("UPDATE clients SET status = :s WHERE client_id = :i"), {"s": new_status, "i": target_id})
-                        s.commit()
-                    st.success(f"Status changed to {new_status}")
-                    st.cache_data.clear()
-                    st.rerun()
 
             st.divider()
             
+            # --- ORIGINAL WIPE LOGIC (SAFE & STABLE) ---
             confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
             
             if confirm_check:
@@ -887,15 +878,18 @@ with t4:
                         try:
                             with st.spinner("Wiping..."):
                                 try:
+                                    # Safe filename for photo removal
                                     safe_file = target_id.replace('/', '-')
                                     sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
                                 except Exception: 
                                     pass 
 
                                 with conn.session as s:
+                                    # Delete from both tables
                                     s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()
+                            
                             st.success("🗑️ Erased successfully.")
                             st.cache_data.clear()
                             time.sleep(2)

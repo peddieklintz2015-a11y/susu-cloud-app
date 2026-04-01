@@ -836,87 +836,91 @@ elif choice == "🛠 Admin Tools":
          st.info("The contributions database is currently empty.") 
 
     with t4:
-        st.subheader("⚙️ Secure Client Profile Manager")
-        st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
+     st.subheader("⚙️ Secure Client Profile Manager")
+    st.error("❗ *CRITICAL AREA*: Deletion removes the client, photo, and history permanently.")
 
-        # Check if the clients table is defined and has data
-        if 'clients' in locals() and not clients.empty:
-            search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
+    # 1. Check if the clients table is defined and has data
+    if 'clients' in locals() and not clients.empty:
+        # Define search_query BEFORE filtering to avoid NameError
+        search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
+        
+        # Filter the clients dataframe based on search
+        filtered = clients[
+            clients['client_name'].str.contains(search_query, case=False) | 
+            clients['client_id'].astype(str).str.contains(search_query, case=False)
+        ]
+
+        if not filtered.empty:
+            selected_name = st.selectbox("Select Profile to Manage:", filtered['client_name'])
             
-            # Filter the clients dataframe based on search
-            filtered = clients[
-                clients['client_name'].str.contains(search_query, case=False) | 
-                clients['client_id'].str.contains(search_query, case=False)
-            ]
+            # Fetch specific client data
+            c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+            target_id = str(c_data['client_id']) 
+            
+            # --- SAFETY CALCULATION ---
+            final_balance = 0.0
+            u_history = pd.DataFrame() 
 
-            if not filtered.empty:
-                selected_name = st.selectbox("Select Profile to Manage:", filtered['client_name'])
-                
-                # Fetch specific client data
-                c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-                target_id = str(c_data['client_id']) 
-                
-                # --- START OF SAFETY FIX FOR LINE 597 ---
-                final_balance = 0.0
-                u_history = pd.DataFrame() 
+            if 'contributions' in locals() and not contributions.empty:
+                if 'client_name' in contributions.columns:
+                    u_history = contributions[contributions['client_name'] == selected_name]
+                    final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
 
-                # Only try to filter if contributions is not empty AND contains the 'client_name' column
-                if 'contributions' in locals() and not contributions.empty:
-                    if 'client_name' in contributions.columns:
-                        u_history = contributions[contributions['client_name'] == selected_name]
-                        if not u_history.empty:
-                            final_balance = u_history['amount'].sum()
-                # --- END OF SAFETY FIX ---
+            # --- DISPLAY PROFILE ---
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                photo_url = c_data.get('photo_url')
+                if photo_url and str(photo_url) not in ['None', 'nan', '']:
+                    st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
+                else:
+                    st.info("No Photo")
+            with col2:
+                st.write(f"**Name:** {c_data['client_name']}")
+                st.write(f"**Phone:** {c_data.get('phone', 'N/A')}")
+                st.write(f"**Daily Rate:** GHS {c_data.get('daily_mark', 0.0):,.2f}")
+                st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
 
-                # Display Profile Info
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    if c_data.get('photo_url'):
-                        st.image(c_data['photo_url'], caption=f"ID: {target_id}", use_container_width=True)
-                with col2:
-                    st.write(f"**Name:** {c_data['client_name']}")
-                    st.write(f"**Phone:** {c_data['phone']}")
-                    st.write(f"**Payout Due:** GHS {final_balance:,.2f}")
-
-                st.markdown("---")
+            st.divider()
+            
+            # --- SECURITY CHECKPOINT ---
+            confirm_check = st.checkbox(f"⚠️ I confirm I want to wipe {selected_name} ({target_id}) forever.", key="del_check")
+            
+            if confirm_check:
+                admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
                 
-                # Security Checkpoint
-                confirm_check = st.checkbox(f"I confirm I want to wipe {target_id} forever.", key="del_check")
-                
-                if confirm_check:
-                    admin_pass = st.text_input("🔐 Admin Password Required", type="password", key="wipe_pass_input")
-                    
-                    if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                        if admin_pass == st.secrets["passwords"]["admin_password"]:
-                            try:
+                if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                    if admin_pass == st.secrets["passwords"]["admin_password"]:
+                        try:
+                            with st.spinner("Wiping data..."):
                                 # 1. Cleanup Cloud Storage Photo
-                                safe_filename = target_id.replace('/', '-')
-                                file_path = f"{safe_filename}.jpg"
                                 try:
-                                    sb_client.storage.from_("client-photos").remove([file_path])
+                                    # Use the ID for filename safety
+                                    safe_filename = target_id.replace('/', '-')
+                                    sb_client.storage.from_("client-photos").remove([f"{safe_filename}.jpg"])
                                 except Exception:
-                                    pass # Ignore if photo doesn't exist
+                                    pass 
 
-                                # 2. Database Cleanup
+                                # 2. Database Cleanup (Cloud)
                                 with conn.session as s:
-                                    # Use safe deletion logic
+                                    # Wipe contributions first (Foreign Key safety)
                                     s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                    # Wipe client record
                                     s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
                                     s.commit()
 
-                                st.toast(f"🗑️ {target_id} wiped successfully.", icon="💥")
-                                st.cache_data.clear() # Forces app to refresh data
-                                time.sleep(1.5)
-                                st.rerun()
-                                
-                            except Exception as e:
-                                st.error(f"🚨 Wipe Failed: {e}")
-                        else:
-                            st.error("❌ Incorrect Admin Password.")
-            else:
-                st.info("No matching profiles found for your search.")
+                            st.success(f"🗑️ {selected_name} has been erased from history.")
+                            st.cache_data.clear() 
+                            time.sleep(2)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"🚨 Wipe Failed: {e}")
+                    else:
+                        st.error("❌ Incorrect Admin Password.")
         else:
-            st.info("The client database is currently empty. No profiles to manage.")
+            st.info("No matching profiles found.")
+    else:
+        st.info("The client database is currently empty.")
 
     with t5:
         st.header("🧨 Factory Reset & Security")

@@ -778,14 +778,14 @@ elif choice == "🛠 Admin Tools":
         st.divider()
 
         # 2. Reversal Logic
-st.subheader("🛑 Restricted Data Cleanup")
-admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
+        st.subheader("🛑 Restricted Data Cleanup")
+        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
 
-if admin_entry == st.secrets["passwords"]["admin_password"]:
-    if not contributions.empty:
-        search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
+            if not contributions.empty:
+             search_term = st.text_input("Filter by Client Name", key="cleanup_filter")
         
-        # Filter the dataframe based on search
+           # Filter the dataframe based on search
         f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
         
         if not f_df.empty:
@@ -830,10 +830,10 @@ if admin_entry == st.secrets["passwords"]["admin_password"]:
                         st.rerun()
                 except Exception as e:
                     st.error(f"🚨 Reversal Failed: {e}")
+            else:
+             st.info("No matching entries found for this client.")
         else:
-            st.info("No matching entries found for this client.")
-    else:
-        st.info("The contributions database is currently empty.") 
+         st.info("The contributions database is currently empty.") 
 
     with t4:
         st.subheader("⚙️ Secure Client Profile Manager")

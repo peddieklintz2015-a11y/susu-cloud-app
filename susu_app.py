@@ -231,6 +231,57 @@ def draw_sidebar_log(df):
             else:
                 st.info("No activity yet.")
 
+def generate_susu_receipt(idx, date_str, client_name, amount, marks, bal_after=None):
+    # Calculate local logic for the receipt look
+    t_type_label = "DEPOSIT" if amount > 0 else "WITHDRAWAL"
+    
+    # If we don't pass a balance (like in simple history), we hide those rows
+    bal_html = ""
+    if bal_after is not None:
+        bal_before = float(bal_after - amount)
+        bal_html = f"""
+        <tr><td>Prev. Balance:</td><td style="text-align:right;">GHS {bal_before:,.2f}</td></tr>
+        <tr style="font-weight:bold;"><td>New Balance:</td><td style="text-align:right;">GHS {bal_after:,.2f}</td></tr>
+        """
+
+    receipt_html = f"""
+    <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 15px; background: white; color: black; border: 1px solid #ddd; line-height: 1.2;">
+        <center>
+            <h3 style="margin:0;">RUCHANET SUSU</h3>
+            <p style="font-size:10px; margin:2px;">Fintech Solutions & Savings</p>
+            <p style="font-size:11px; margin:0;">* TRANSACTION RECEIPT *</p>
+        </center>
+        <hr style="border-top: 1px dashed #000;">
+        <div style="font-size:12px;">
+            <b>Date/Time:</b> {date_str}<br>
+            <b>Client:</b> {client_name}<br>
+            <b>Type:</b> {t_type_label}<br>
+        </div>
+        <hr style="border-top: 1px dashed #000;">
+        <table style="width:100%; font-size:13px; font-weight:bold;">
+            <tr><td>Amount:</td><td style="text-align:right;">GHS {abs(amount):,.2f}</td></tr>
+            <tr><td>Marks:</td><td style="text-align:right;">{abs(marks)}</td></tr>
+        </table>
+        <hr style="border-top: 1px dashed #000;">
+        <table style="width:100%; font-size:12px;">
+            {bal_html}
+        </table>
+        <hr style="border-top: 1px dashed #000;">
+        <center><p style="font-size:11px;"><i>Thank you for saving!</i><br>Verified Digital Record</p></center>
+    </div>
+    <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:8px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+    <script>
+    function printDiv(divId) {{
+        var content = document.getElementById(divId).innerHTML;
+        var win = window.open('', '', 'height=600,width=450');
+        win.document.write('<html><body style="font-family:monospace;">' + content + '</body></html>');
+        win.document.close();
+        setTimeout(function() {{ win.print(); win.close(); }}, 500);
+    }}
+    </script>
+    """
+    return components.html(receipt_html, height=400)
+
 def get_next_gen_id(reg_date):
     # Format month and year: e.g., "03/26"
     mm_yy = reg_date.strftime("%m/%y")
@@ -473,7 +524,6 @@ elif choice == "💸 Transactions":
         c_id = client_row.get('client_id', 'N/A')
         
         # --- DATA RETRIEVAL ---
-        # Ensure we are looking at the most recent data
         user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
         total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
         total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
@@ -506,11 +556,10 @@ elif choice == "💸 Transactions":
             
             if d_mark > 0:
                 # --- NEW STRICT VALIDATION: MULTIPLE CHECK ---
-                # Check if requested_cash is a clean multiple of d_mark
                 if requested_cash > 0 and (requested_cash % d_mark) != 0:
                     st.error(f"🚫 **Invalid Amount:** GHS {requested_cash:,.2f} is not a multiple of the Daily Rate (GHS {d_mark:,.2f}).")
                     st.info(f"Accepted amounts: {d_mark}, {d_mark*2}, {d_mark*3}, etc.")
-                    st.stop() # Kill process immediately
+                    st.stop() 
                 
                 marks_for_cash = int(requested_cash / d_mark)
                 
@@ -528,7 +577,6 @@ elif choice == "💸 Transactions":
                 total_marks_needed_to_be_safe = marks_for_cash + shadow_fee_marks
                 
                 if requested_cash > 0:
-                    # Bouncer Bypass for Migration
                     if not is_migration:
                         if total_marks_saved < total_marks_needed_to_be_safe:
                             st.error("🚫 **Insufficient Reserved Marks.**")
@@ -543,19 +591,17 @@ elif choice == "💸 Transactions":
                     else:
                         st.warning(f"📉 **Full Payout**: Total Deduction GHS {abs(db_amt):,.2f}")
 
-        # --- 3. SYNC & RECEIPT ---
+        # --- 3. SYNC & RECEIPT (Now properly indented) ---
         st.divider()
         col_confirm, col_refresh = st.columns(2)
-        
+
         with col_confirm:
             if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
-                # --- GHANA TIMEZONE LOCK ---
                 import pytz
                 from datetime import datetime
                 ghana_tz = pytz.timezone('Africa/Accra')
                 now_ghana = datetime.now(ghana_tz)
                 
-                # Create entry using your local system's date and time
                 new_entry = {
                     'client_id': str(c_id),
                     'client_name': target,
@@ -569,27 +615,21 @@ elif choice == "💸 Transactions":
                     st.success(f"✅ Transaction Synced at {now_ghana.strftime('%H:%M:%S')}!")
                     st.balloons()
                     
-                    # Digital Receipt formatted for the popup
                     t_date_str = now_ghana.strftime('%Y-%m-%d %H:%M')
-                    receipt_html = f"""
-<div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
-    <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
-    <hr>
-    <b>Date/Time:</b> {t_date_str}<br>
-    <b>Client:</b> {target}<br>
-    ---------------------------<br>
-    <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
-    <b>Marks:</b> {db_marks}<br>
-    ---------------------------<br>
-    <b>Verified Ghana Record</b>
-</div>
-<button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
-"""
-                    components.html(receipt_html, height=350)
+                    
+                    # Call the function 
+                    generate_susu_receipt(
+                        idx=now_ghana.strftime('%H%M%S'), 
+                        date_str=t_date_str, 
+                        client_name=target, 
+                        amount=float(db_amt), 
+                        marks=int(db_marks), 
+                        bal_after=float(total_saved_ghs + db_amt)
+                    )
                     
                     st.cache_data.clear()
                     import time
-                    time.sleep(5) # Gives you time to see the receipt before refresh
+                    time.sleep(5) 
                     st.rerun()
 
         with col_refresh:
@@ -676,33 +716,14 @@ elif choice == "📑 Digital Passbook":
                             st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
 
-                        with col_print:
-                            receipt_html = f"""
-<div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 260px; padding: 10px; background: white; color: black; border: 1px solid #000;">
-    <center><h4 style="margin:0;">RUCHANET SUSU</h4></center>
-    <hr>
-    <p style="font-size:12px;">
-        <b>Date/Time:</b> {t_date_str}<br>
-        <b>Client:</b> {target}<br>
-        ----------------------------<br>
-        <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
-        <b>Marks:</b> {row['marks_covered']}<br>
-        ----------------------------<br>
-        <b>Verified Record</b>
-    </p>
-</div>
-<button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print</button>
-<script>
-function printDiv(divId) {{
-    var printContents = document.getElementById(divId).innerHTML;
-    var printWindow = window.open('', '', 'height=500,width=400');
-    printWindow.document.write('<html><body>' + printContents + '</body></html>');
-    printWindow.document.close();
-    printWindow.print();
-}}
-</script>
-"""
-                            components.html(receipt_html, height=350)
+                        generate_susu_receipt(
+                            idx=idx, 
+                            date_str=t_date_str, 
+                            client_name=target, 
+                            amount=float(row['amount']), 
+                            marks=row['marks_covered'],
+                            bal_after=None # Hides balance rows for historical receipts
+                        )
             else:
                 st.info("No transaction history found.")
         else:

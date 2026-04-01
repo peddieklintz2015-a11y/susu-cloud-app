@@ -28,22 +28,21 @@ def sync_data_dual(new_record):
     success_local = False
     success_cloud = False
     
-    # --- LOCAL SQLITE SYNC ---
+    # --- 1. LOCAL SQLITE SYNC ---
     try:
         conn_local = sqlite3.connect('susu_data.db')
         
-        # 1. Create table if it doesn't exist at all
+        # Ensure table exists
         conn_local.execute("""
             CREATE TABLE IF NOT EXISTS contributions 
             (client_id TEXT, client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
         """)
         
-        # 2. PRO FIX: Instead of a bare except, we check for the specific SQLite error
+        # Ensure client_id column exists
         try:
             conn_local.execute("ALTER TABLE contributions ADD COLUMN client_id TEXT")
         except sqlite3.OperationalError:
-            # This specific error means the column already exists, so we just skip it
-            pass
+            pass # Column already exists
             
         local_df = pd.DataFrame([new_record])
         local_df.to_sql('contributions', conn_local, if_exists='append', index=False)
@@ -52,7 +51,7 @@ def sync_data_dual(new_record):
     except Exception as e:
         st.error(f"Local Save Error: {e}")
 
-    # --- CLOUD POSTGRES SYNC ---
+    # --- 2. CLOUD POSTGRES (SUPABASE) SYNC ---
     try:
         with conn.session as s:
             s.execute(text("""
@@ -64,32 +63,15 @@ def sync_data_dual(new_record):
                 "am": float(new_record['amount']),
                 "dt": new_record['date'],
                 "mk": int(new_record['marks_covered']),
-                "fe": float(new_record['fee'])
+                "fe": float(new_record.get('fee', 0.0))
             })
             s.commit()
-        success_cloud = True
+            success_cloud = True
     except Exception as e:
         st.error(f"Cloud Sync Error: {e}")
         
-    return success_local and success_cloud
-
-    try:
-        with conn.session as s:
-            s.execute(text("""
-                INSERT INTO contributions (client_id, client_name, amount, date, marks_covered, fee)
-                VALUES (:ci, :cn, :am, :dt, :mk, :fe)
-            """), {
-                "ci": new_record.get('client_id', 'N/A'),
-                "cn": new_record['client_name'],
-                "am": float(new_record['amount']),
-                "dt": new_record['date'],
-                "mk": int(new_record['marks_covered']),
-                "fe": float(new_record['fee'])
-            })
-            s.commit()
-        success_cloud = True
-    except Exception as e:
-        st.error(f"Cloud Sync Error: {e}")
+    # --- 3. FINAL RETURN ---
+    # Only one return at the very bottom so all code above is executed.
     return success_local and success_cloud
 
 # --- PWA CONFIGURATION ---

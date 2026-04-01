@@ -656,7 +656,6 @@ elif choice == "📑 Digital Passbook":
     query_id = str(uuid.uuid4()) 
     
     try:
-        # Force a fresh pull of data every time the tab is clicked
         contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
         clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
     except Exception as e:
@@ -670,27 +669,48 @@ elif choice == "📑 Digital Passbook":
         
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
-            c_info = clients[clients['client_name'] == target].iloc[0]
+            c_info = filtered[filtered['client_name'] == target].iloc[0]
             
-            # --- AGGREGATE DATA & DATE/TIME RECOVERY ---
+            # --- 1. SUPABASE PHOTO DISPLAY ---
+            # Replace 'YOUR_PROJECT_REF' with your actual Supabase Project ID (e.g., peddieklintz...)
+            project_id = "peddieklintz2015-a11y" 
+            bucket_name = "client-photos"
+            
+            col_img, col_details = st.columns([1, 3])
+            
+            with col_img:
+                # Check if the 'image' column has the filename (e.g., "client_123.png")
+                image_filename = c_info.get('image')
+                if image_filename and pd.notna(image_filename):
+                    # Construct the public URL for Supabase Storage
+                    img_url = f"https://{project_id}.supabase.co/storage/v1/object/public/{bucket_name}/{image_filename}"
+                    st.image(img_url, width=150, use_container_width=False)
+                else:
+                    # Fallback icon if no image exists
+                    st.write("👤 No Photo")
+            
+            with col_details:
+                st.subheader(f"{target}")
+                st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
+                st.write(f"📞 **Phone:** {c_info.get('phone', 'N/A')}")
+
+            # --- 2. AGGREGATE DATA ---
             user_history = pd.DataFrame()
             if 'contributions' in locals() and not contributions.empty:
                 df_temp = contributions[contributions['client_name'] == target].copy()
                 
-                # DATE/TIME PARSER - FIXED: No "bare except"
                 def parse_date_with_time(date_val):
-                    if pd.isna(date_val) or date_val == "": 
+                    if pd.isna(date_val) or date_val == "":
                         return None
                     formats = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M', '%Y-%m-%d')
                     for fmt in formats:
-                        try:
+                        try: 
                             return pd.to_datetime(date_val, format=fmt)
-                        except (ValueError, TypeError):
+                        except(ValueError, TypeError):
                             continue
                     return pd.to_datetime(date_val, errors='coerce')
 
                 df_temp['date'] = df_temp['date'].apply(parse_date_with_time)
-                
                 total_marks = int(df_temp['marks_covered'].fillna(0).sum())
                 current_balance = float(df_temp['amount'].fillna(0).sum())
                 user_history = df_temp.sort_values(by='date', ascending=False)
@@ -698,7 +718,7 @@ elif choice == "📑 Digital Passbook":
                 total_marks = 0
                 current_balance = 0.0
             
-            # --- UI METRICS ---
+            # --- 3. UI METRICS ---
             m1, m2, m3 = st.columns(3)
             m1.metric("💰 Balance", f"GHS {current_balance:,.2f}")
             m2.metric("📅 Total Marks", f"{total_marks}")
@@ -706,33 +726,30 @@ elif choice == "📑 Digital Passbook":
 
             st.divider()
             
-            # --- TRANSACTION HISTORY ---
+            # --- 4. TRANSACTION HISTORY & RECEIPT FIX ---
             st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    if pd.isna(row['date']):
-                        t_date_str = "Unknown Date/Time"
-                    else:
-                        t_date_str = row['date'].strftime('%Y-%m-%d %H:%M')
-                        
+                    t_date_str = row['date'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['date']) else "Unknown"
                     t_amt = float(row['amount'])
                     t_type = "Deposit" if t_amt > 0 else "Withdrawal"
                     
                     with st.expander(f"{t_date_str} | {t_type} | GHS {abs(t_amt):,.2f}"):
                         col_text, col_print = st.columns([2, 1])
                         with col_text:
-                            st.write(f"**Exact Date/Time:** {t_date_str}")
-                            st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
-
-                        generate_susu_receipt(
-                            idx=idx, 
-                            date_str=t_date_str, 
-                            client_name=target, 
-                            amount=float(row['amount']), 
-                            marks=row['marks_covered'],
-                            bal_after=None # Hides balance rows for historical receipts
-                        )
+                        
+                        with col_print:
+                            # Use st.markdown to render the HTML returned by your function
+                            receipt_html = generate_susu_receipt(
+                                idx=idx, 
+                                date_str=t_date_str, 
+                                client_name=target, 
+                                amount=t_amt, 
+                                marks=row['marks_covered'],
+                                bal_after=None
+                            )
+                            st.markdown(receipt_html, unsafe_allow_html=True)
             else:
                 st.info("No transaction history found.")
         else:

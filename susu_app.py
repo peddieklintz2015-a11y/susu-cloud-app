@@ -489,44 +489,48 @@ elif choice == "💸 Transactions":
         else: # --- WITHDRAWAL LOGIC ---
             w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
             
-            # --- HELPER: CALCULATE MAX CASH ---
-            if d_mark > 0:
-                if w_method == "Full Payout (Include Commission)":
-                    # Formula: Reserve 1 mark for every 31 marks of cash
-                    est_commissions = math.ceil(total_marks_saved / 32)
-                    max_cash_marks = max(0, total_marks_saved - est_commissions)
-                    max_cash_allowed = float(max_cash_marks * d_mark)
-                    st.success(f"💡 **Suggested Max Cash:** GHS {max_cash_allowed:,.2f}")
-                else:
-                    st.info(f"💡 **Available Balance:** GHS {total_saved_ghs:,.2f}")
-
+            # 1. Input for Cash
             requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=d_mark)
             
             if d_mark > 0:
                 marks_for_cash = int(requested_cash / d_mark)
                 
+                # --- CALCULATE ACTUAL DB VALUES ---
                 if w_method == "Full Payout (Include Commission)":
-                    # TIERED COMMISSION: 1-31 = 1 mark, 32-62 = 2 marks
                     num_commissions = math.ceil(marks_for_cash / 31)
                     db_fee = float(num_commissions * d_mark)
                     db_marks = -(marks_for_cash + num_commissions)
                 else:
-                    # ADVANCE PAYMENT: Deduct marks for cash only.
+                    # Advance Payment: No fee recorded in DB
                     db_fee = 0.0
                     db_marks = -marks_for_cash
                 
                 db_amt = -float(requested_cash + db_fee)
 
-                # --- VALIDATION ---
+                # --- 2. THE SHADOW CHECK (The "Bouncer" Logic) ---
+                # Even for Advance, we calculate what the fee WOULD be
+                shadow_commissions = math.ceil(marks_for_cash / 31)
+                total_required_marks = marks_for_cash + shadow_commissions
+                
                 if requested_cash > 0:
-                    if total_marks_saved < abs(db_marks):
-                        st.error(f"🚫 Insufficient Marks. Needed: {abs(db_marks)}, Have: {total_marks_saved}")
-                        st.stop()
-                    if abs(db_amt) > (total_saved_ghs + 0.01) and not is_migration:
-                        st.error("⚠️ Insufficient Balance to cover Cash + Fee.")
+                    # We check against total_required_marks even if db_marks is smaller
+                    if total_marks_saved < total_required_marks:
+                        st.error(f"🚫 Insufficient Funds for future Commission. "
+                                 f"You need {total_required_marks} marks total to cover this cash plus its commission, "
+                                 f"but you only have {total_marks_saved}.")
                         st.stop()
                     
-                    st.warning(f"📉 Total Deduction: GHS {abs(db_amt):,.2f} (Fee: {db_fee})")
+                    # Standard balance check for the actual transaction
+                    if abs(db_amt) > (total_saved_ghs + 0.01) and not is_migration:
+                        st.error("⚠️ Insufficient Cash Balance.")
+                        st.stop()
+                    
+                    # UI feedback
+                    if w_method == "Advance Payment (No Commission Now)":
+                        st.warning(f"ℹ️ Advance Mode: Deducting {marks_for_cash} marks. "
+                                   f"Commission of {shadow_commissions} marks is reserved and must be paid later.")
+                    else:
+                        st.warning(f"📉 Total Deduction: GHS {abs(db_amt):,.2f} (Includes Fee: {db_fee})")
 
         # --- 3. SYNC & RECEIPT ---
         if st.button("🚀 Confirm & Sync Transaction"):

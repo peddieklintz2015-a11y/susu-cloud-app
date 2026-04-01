@@ -767,146 +767,140 @@ elif choice == "🛠 Admin Tools":
         st.subheader("🧹 Database Health & Reversals")
         admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
 
-    if admin_entry == st.secrets["passwords"]["admin_password"]:
-        if not contributions.empty:
-            # --- IMPROVED QUICK UNDO ---
-            st.markdown("### ⏪ Quick Undo (Delete by ID)")
-            
-            # 1. We get the last 10 transactions
-            recent_data = contributions.sort_values(by='id', ascending=False).head(10)
-            
-            # 2. Create a helper function to show more info in the dropdown
-            def format_undo_label(id_val):
-                row = recent_data[recent_data['id'] == id_val].iloc[0]
-                return f"ID: {id_val} | {row['date']} | {row['client_name']} | GHS {row['amount']}"
-
-            # 3. Show the dropdown with the new labels
-            id_to_wipe = st.selectbox(
-                "Select Transaction to PERMANENTLY DELETE:", 
-                options=recent_data['id'].tolist(),
-                format_func=format_undo_label,
-                key="undo_selector"
-            )
-            
-            if st.button("🗑️ Delete Entry & Fix Balance", type="secondary", use_container_width=True):
-                try:
-                    with conn.session as s:
-                        s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": id_to_wipe})
-                        s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('MANUAL_DELETE', :d, 'Manager')"), 
-                                  {"d": f"Deleted Transaction ID {id_to_wipe}"})
-                        s.commit()
-                    st.success(f"✅ Transaction {id_to_wipe} deleted successfully!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-            
-            st.divider()
-
-            # --- ORIGINAL REVERSAL LOGIC (KEEPING AS COUNTER-ENTRY) ---
-            st.markdown("### ➕ Perform Professional Reversal")
-            st.info("This adds a negative entry to cancel out a transaction (keeping a paper trail).")
-            search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
-            f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
-            
-            if not f_df.empty:
-                f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-                to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
+        # Everything below this is now correctly indented inside the "with t3" block
+        if admin_entry == st.secrets["passwords"]["admin_password"]:
+            if not contributions.empty:
+                # --- IMPROVED QUICK UNDO ---
+                st.markdown("### ⏪ Quick Undo (Delete by ID)")
                 
-                if st.button("🔄 Authorize Professional Reversal"):
+                recent_data = contributions.sort_values(by='id', ascending=False).head(10)
+                
+                def format_undo_label(id_val):
+                    row = recent_data[recent_data['id'] == id_val].iloc[0]
+                    return f"ID: {id_val} | {row['date']} | {row['client_name']} | GHS {row['amount']}"
+
+                id_to_wipe = st.selectbox(
+                    "Select Transaction to PERMANENTLY DELETE:", 
+                    options=recent_data['id'].tolist(),
+                    format_func=format_undo_label,
+                    key="undo_selector"
+                )
+                
+                if st.button("🗑️ Delete Entry & Fix Balance", type="secondary", use_container_width=True):
                     try:
-                        selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
-                        target_row = f_df[f_df['id'] == selected_id].iloc[0]
-
-                        # Create the counter-entry dictionary
-                        reversal_entry = {
-                            'amount': -float(target_row['amount']),
-                            'client_name': target_row['client_name'],
-                            'date': datetime.now().isoformat(),
-                            'fee': -float(target_row.get('fee', 0.0)),
-                            'marks_covered': -int(target_row['marks_covered']),
-                            'client_id': str(target_row.get('client_id', 'N/A'))
-                        }
-
-                        if sync_data_dual(reversal_entry):
-                            with conn.session as s:
-                                s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('REVERSAL', :d, 'Manager')"), 
-                                          {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
-                                s.commit()
-                            st.success("✅ Reversal Synced!")
-                            st.cache_data.clear()
-                            time.sleep(2)
-                            st.rerun()
+                        with conn.session as s:
+                            s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": id_to_wipe})
+                            s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('MANUAL_DELETE', :d, 'Manager')"), 
+                                      {"d": f"Deleted Transaction ID {id_to_wipe}"})
+                            s.commit()
+                        st.success(f"✅ Transaction {id_to_wipe} deleted successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
                     except Exception as e:
-                        st.error(f"🚨 Reversal Failed: {e}")
+                        st.error(f"Error: {e}")
+                
+                st.divider()
 
-     # --- TAB 4: MANAGE PROFILE (THE FIX) ---
-    with t4:
-       st.subheader("⚙️ Secure Client Profile Manager")
-       st.error("❗ Deletion removes the client and photo permanently.")
-
-    if 'clients' in locals() and not clients.empty:
-        search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
-        
-        # Correctly indented inside the Tab 4 block
-        filtered = clients[
-            clients['client_name'].str.contains(search_query, case=False) | 
-            clients['client_id'].astype(str).str.contains(search_query, case=False)
-        ]
-
-        if not filtered.empty:
-            selected_name = st.selectbox("Select Profile:", filtered['client_name'])
-            c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-            target_id = str(c_data['client_id']) 
-            
-            final_balance = 0.0
-            if 'contributions' in locals() and not contributions.empty:
-                u_history = contributions[contributions['client_name'] == selected_name]
-                final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
-
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                photo_url = c_data.get('photo_url')
-                if photo_url and str(photo_url) not in ['None', 'nan', '']:
-                    st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
-            with col2:
-                st.write(f"*Name:* {c_data['client_name']}")
-                st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
-
-            st.divider()
-            
-            # --- ORIGINAL WIPE LOGIC (SAFE & STABLE) ---
-            confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
-            
-            if confirm_check:
-                wipe_pass = st.text_input("🔐 Admin Password", type="password", key="wipe_pass_input")
-                if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                    if wipe_pass == st.secrets["passwords"]["admin_password"]:
+                # --- ORIGINAL REVERSAL LOGIC ---
+                st.markdown("### ➕ Perform Professional Reversal")
+                st.info("This adds a negative entry to cancel out a transaction (keeping a paper trail).")
+                search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
+                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
+                
+                if not f_df.empty:
+                    f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
+                    to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
+                    
+                    if st.button("🔄 Authorize Professional Reversal"):
                         try:
-                            with st.spinner("Wiping..."):
-                                try:
-                                    # Safe filename for photo removal
-                                    safe_file = target_id.replace('/', '-')
-                                    sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
-                                except Exception: 
-                                    pass 
+                            selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
+                            target_row = f_df[f_df['id'] == selected_id].iloc[0]
 
+                            reversal_entry = {
+                                'amount': -float(target_row['amount']),
+                                'client_name': target_row['client_name'],
+                                'date': datetime.now().isoformat(),
+                                'fee': -float(target_row.get('fee', 0.0)),
+                                'marks_covered': -int(target_row['marks_covered']),
+                                'client_id': str(target_row.get('client_id', 'N/A'))
+                            }
+
+                            if sync_data_dual(reversal_entry):
                                 with conn.session as s:
-                                    # Delete from both tables
-                                    s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
-                                    s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                    s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('REVERSAL', :d, 'Manager')"), 
+                                              {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
                                     s.commit()
-                            
-                            st.success("🗑️ Erased successfully.")
-                            st.cache_data.clear()
-                            time.sleep(2)
-                            st.rerun()
+                                st.success("✅ Reversal Synced!")
+                                st.cache_data.clear()
+                                time.sleep(2)
+                                st.rerun()
                         except Exception as e:
-                            st.error(f"🚨 Wipe Failed: {e}")
+                            st.error(f"🚨 Reversal Failed: {e}")
+
+    # --- TAB 4: MANAGE PROFILE (THE FIX) ---
+    with t4:
+        st.subheader("⚙️ Secure Client Profile Manager")
+        st.error("❗ Deletion removes the client and photo permanently.")
+
+        # Everything below this is now correctly indented inside the "with t4" block
+        if 'clients' in locals() and not clients.empty:
+            search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
+            
+            filtered = clients[
+                clients['client_name'].str.contains(search_query, case=False) | 
+                clients['client_id'].astype(str).str.contains(search_query, case=False)
+            ]
+
+            if not filtered.empty:
+                selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+                c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+                target_id = str(c_data['client_id']) 
+                
+                final_balance = 0.0
+                if 'contributions' in locals() and not contributions.empty:
+                    u_history = contributions[contributions['client_name'] == selected_name]
+                    final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
+
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    photo_url = c_data.get('photo_url')
+                    if photo_url and str(photo_url) not in ['None', 'nan', '']:
+                        st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
+                with col2:
+                    st.write(f"*Name:* {c_data['client_name']}")
+                    st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
+
+                st.divider()
+                
+                confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
+                
+                if confirm_check:
+                    wipe_pass = st.text_input("🔐 Admin Password", type="password", key="wipe_pass_input")
+                    if st.button("💥 AUTHORIZE PERMANENT WIPE"):
+                        if wipe_pass == st.secrets["passwords"]["admin_password"]:
+                            try:
+                                with st.spinner("Wiping..."):
+                                    try:
+                                        safe_file = target_id.replace('/', '-')
+                                        sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
+                                    except Exception: 
+                                        pass 
+
+                                    with conn.session as s:
+                                        s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                        s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                        s.commit()
+                                
+                                st.success("🗑️ Erased successfully.")
+                                st.cache_data.clear()
+                                time.sleep(2)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"🚨 Wipe Failed: {e}")
+            else:
+                st.info("No matching profiles.")
         else:
-            st.info("No matching profiles.")
-    else:
-        st.info("Database empty.")
+            st.info("Database empty.")
 
     # --- TAB 5: RESET SYSTEM ---
     with t5:

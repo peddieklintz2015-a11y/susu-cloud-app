@@ -505,6 +505,13 @@ elif choice == "💸 Transactions":
             requested_cash = st.number_input("Cash Amount (GHS)", min_value=0.0, step=float(d_mark))
             
             if d_mark > 0:
+                # --- NEW STRICT VALIDATION: MULTIPLE CHECK ---
+                # Check if requested_cash is a clean multiple of d_mark
+                if requested_cash > 0 and (requested_cash % d_mark) != 0:
+                    st.error(f"🚫 **Invalid Amount:** GHS {requested_cash:,.2f} is not a multiple of the Daily Rate (GHS {d_mark:,.2f}).")
+                    st.info(f"Accepted amounts: {d_mark}, {d_mark*2}, {d_mark*3}, etc.")
+                    st.stop() # Kill process immediately
+                
                 marks_for_cash = int(requested_cash / d_mark)
                 
                 if w_method == "Full Payout (Include Commission)":

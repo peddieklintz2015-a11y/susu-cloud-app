@@ -769,33 +769,40 @@ with t3:
 
     if admin_entry == st.secrets["passwords"]["admin_password"]:
         if not contributions.empty:
-            # --- NEW: UNDO LOGIC ---
-            st.markdown("### ⏪ Undo a Recent Reversal")
-            rev_df = contributions[contributions['type'] == 'REVERSAL'].copy()
-            
-            if not rev_df.empty:
-                rev_to_undo = st.selectbox("Select Reversal to REMOVE", rev_df['id'], 
-                                            format_func=lambda x: f"ID:{x} | {rev_df[rev_df['id']==x]['client_name'].values[0]}")
-                if st.button("🗑️ Delete Reversal & Restore Balance"):
-                    with conn.session as s:
-                        s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": rev_to_undo})
-                        s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('UNDO_REVERSAL', :d, 'Manager')"), 
-                                  {"d": f"Deleted Reversal ID {rev_to_undo}"})
-                        s.commit()
-                    st.success(f"✅ Reversal {rev_to_undo} removed. Data restored.")
-                    st.cache_data.clear()
-                    st.rerun()
+            # --- SAFETY CHECK FOR 'TYPE' COLUMN ---
+            if 'type' in contributions.columns:
+                st.markdown("### ⏪ Undo a Recent Reversal")
+                rev_df = contributions[contributions['type'] == 'REVERSAL'].copy()
+                
+                if not rev_df.empty:
+                    rev_to_undo = st.selectbox("Select Reversal to REMOVE", rev_df['id'], 
+                                                format_func=lambda x: f"ID:{x} | {rev_df[rev_df['id']==x]['client_name'].values[0]}")
+                    if st.button("🗑️ Delete Reversal & Restore Balance"):
+                        with conn.session as s:
+                            s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": rev_to_undo})
+                            s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('UNDO_REVERSAL', :d, 'Manager')"), 
+                                      {"d": f"Deleted Reversal ID {rev_to_undo}"})
+                            s.commit()
+                        st.success(f"✅ Reversal {rev_to_undo} removed. Data restored.")
+                        st.cache_data.clear()
+                        st.rerun()
+                else:
+                    st.info("No active reversals found to undo.")
             else:
-                st.info("No active reversals found to undo.")
+                # If 'type' column doesn't exist, we skip the undo logic silently
+                st.warning("⚠️ Reversal Undo is unavailable because the 'type' column is missing from your database.")
             
             st.divider()
 
             # --- ORIGINAL REVERSAL LOGIC ---
             st.markdown("### ➕ Perform New Reversal")
             search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
+            
+            # Filtering safety
             f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
             
             if not f_df.empty:
+                # We use .get() for fee to avoid more KeyErrors
                 f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
                 to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
                 
@@ -804,15 +811,19 @@ with t3:
                         selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
                         target_row = f_df[f_df['id'] == selected_id].iloc[0]
 
+                        # Prepare entry - note we only add 'type' if your sync_data_dual supports it
                         reversal_entry = {
                             'amount': -float(target_row['amount']),
                             'client_name': target_row['client_name'],
                             'date': datetime.now().isoformat(),
-                            'type': 'REVERSAL',
                             'fee': -float(target_row.get('fee', 0.0)),
                             'marks_covered': -int(target_row['marks_covered']),
                             'client_id': str(target_row.get('client_id', 'N/A'))
                         }
+                        
+                        # Only add type if your table supports it
+                        if 'type' in contributions.columns:
+                            reversal_entry['type'] = 'REVERSAL'
 
                         if sync_data_dual(reversal_entry):
                             with conn.session as s:

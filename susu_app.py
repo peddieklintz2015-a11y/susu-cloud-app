@@ -588,13 +588,17 @@ elif choice == "💸 Transactions":
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
     
-    # --- LIVE DATA REFRESH ---
-    # This pulls fresh data directly from your database using your existing conn object
+    # --- DEEP REFRESH LOGIC ---
+    # We use uuid to force the SQL query to bypass any 'sticky' browser or server cache
+    import uuid
+    query_id = str(uuid.uuid4()) 
+    
     try:
-        contributions = conn.query("SELECT * FROM contributions", ttl=0)
-        clients = conn.query("SELECT * FROM clients", ttl=0)
+        # ttl=0 and the unique query_id ensure we get the ABSOLUTE latest data
+        contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
+        clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
     except Exception as e:
-        st.error(f"⚠️ Database Refresh Failed: {e}")
+        st.error(f"🚨 Live Data Sync Failed: {e}")
 
     # --- SIDEBAR REFRESH ---
     if st.sidebar.button("🔄 Force System Refresh"):
@@ -614,9 +618,14 @@ elif choice == "📑 Digital Passbook":
             # --- AGGREGATE DATA ---
             user_history = pd.DataFrame()
             if 'contributions' in locals() and not contributions.empty:
+                # Ensure date column is datetime objects for proper sorting
+                contributions['date'] = pd.to_datetime(contributions['date'])
                 user_history = contributions[contributions['client_name'] == target].copy()
+                
                 total_marks = int(user_history['marks_covered'].sum())
                 current_balance = float(user_history['amount'].sum())
+                
+                # Sort by date DESCENDING so new transactions appear at the top
                 user_history = user_history.sort_values(by='date', ascending=False)
             else:
                 total_marks = 0
@@ -645,10 +654,9 @@ elif choice == "📑 Digital Passbook":
             st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    # REPLACED BARE EXCEPT WITH SPECIFIC PANDAS DATE HANDLING
                     try:
-                        t_date = pd.to_datetime(row['date']).strftime('%Y-%m-%d %H:%M')
-                    except (ValueError, TypeError):
+                        t_date = row['date'].strftime('%Y-%m-%d %H:%M')
+                    except (ValueError, TypeError, AttributeError):
                         t_date = str(row['date'])
                         
                     t_amt = float(row['amount'])
@@ -663,7 +671,7 @@ elif choice == "📑 Digital Passbook":
                             st.write(f"**Commission:** GHS {row.get('fee', 0.0):,.2f}")
 
                         with col_print:
-                            # Corrected Indentation for HTML block
+                            # Indentation corrected for HTML block
                             receipt_html = f"""
 <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 260px; padding: 10px; background: white; color: black; border: 1px solid #000;">
     <center>

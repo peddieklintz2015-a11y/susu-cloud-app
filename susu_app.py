@@ -231,8 +231,9 @@ def draw_sidebar_log(df):
             else:
                 st.info("No activity yet.")
 
-def generate_susu_receipt(idx, date_str, client_name, amount, marks, bal_after=None):
-    # Calculate local logic for the receipt look
+def generate_susu_receipt(idx, date_obj, client_name, amount, marks, bal_after=None):
+    # Convert the date object to a nice string for the HTML
+    date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S")
     t_type_label = "DEPOSIT" if amount > 0 else "WITHDRAWAL"
     
     # If we don't pass a balance (like in simple history), we hide those rows
@@ -248,7 +249,7 @@ def generate_susu_receipt(idx, date_str, client_name, amount, marks, bal_after=N
     <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 15px; background: white; color: black; border: 1px solid #ddd; line-height: 1.2;">
         <center>
             <h3 style="margin:0;">RUCHANET SUSU</h3>
-            <p style="font-size:10px; margin:2px;">Fintech Solutions & Savings</p>
+            <p style="font-size:10px; margin:2px;">Rural Christian Network Savings</p>
             <p style="font-size:11px; margin:0;">* TRANSACTION RECEIPT *</p>
         </center>
         <hr style="border-top: 1px dashed #000;">
@@ -267,7 +268,7 @@ def generate_susu_receipt(idx, date_str, client_name, amount, marks, bal_after=N
             {bal_html}
         </table>
         <hr style="border-top: 1px dashed #000;">
-        <center><p style="font-size:11px;"><i>Thank you for saving!</i><br>Verified Digital Record</p></center>
+        <center><p style="font-size:13px;"><span style="font-style: italic;">Thank you for saving with RUCHANET SUSU!</span><br>Verified Digital Record</p></center>
     </div>
     <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:8px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
     <script>
@@ -507,18 +508,26 @@ elif choice == "💸 Transactions":
     # --- 1. SELECTION & MIGRATION UI ---
     if not clients.empty:
         col_search, col_mode, col_date = st.columns([2, 1, 1])
+        
         with col_search:
             client_list = clients['client_name'].tolist()
             target = st.selectbox("Select Client", client_list)
+        
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
+        
         with col_date:
             if is_migration:
-                trans_date = st.date_input("Transaction Date", value=datetime.now().date())
+                # Capture the date from the widget
+                selected_date = st.date_input("Transaction Date", value=datetime.now().date())
+                # COMBINE with current time to create the fix for your backdating
+                final_timestamp = datetime.combine(selected_date, datetime.now().time())
             else:
-                trans_date = datetime.now().date()
-                st.info(f"Date: {trans_date}")
+                # Standard mode uses the actual current time
+                final_timestamp = datetime.now()
+                st.info(f"Date: {final_timestamp.strftime('%Y-%m-%d')}")
 
+        # All the following code MUST stay indented under 'if not clients.empty:'
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
         c_id = client_row.get('client_id', 'N/A')
@@ -528,7 +537,7 @@ elif choice == "💸 Transactions":
         total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
         total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
         
-        st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
+        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {total_saved_ghs:,.2f} | 📅 *Total Marks:* {total_marks_saved}")
         st.divider()
 
         # --- 2. INITIALIZE VARIABLES ---
@@ -542,7 +551,7 @@ elif choice == "💸 Transactions":
             num_marks = st.number_input("Marks to add", min_value=1, step=1)
             db_amt = float(num_marks * d_mark)
             db_marks = int(num_marks)
-            st.info(f"➕ **Deposit:** GHS {db_amt:,.2f}")
+            st.info(f"➕ *Deposit:* GHS {db_amt:,.2f}")
             
         else: # --- WITHDRAWAL LOGIC ---
             w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])

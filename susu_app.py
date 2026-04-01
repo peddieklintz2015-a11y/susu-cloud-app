@@ -586,7 +586,10 @@ elif choice == "💸 Transactions":
 
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
-    
+    # --- ADDED REFRESH BUTTON ---
+    if st.sidebar.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
     search = st.text_input("🔍 Search Client Name", placeholder="Enter name...")
     
     if not clients.empty:

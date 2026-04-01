@@ -6,6 +6,7 @@ import sqlite3
 import time
 import re
 import math
+import pytz
 from datetime import datetime
 from sqlalchemy import text
 from supabase import create_client
@@ -541,41 +542,47 @@ elif choice == "💸 Transactions":
         
         with col_confirm:
             if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
+                # --- GHANA TIMEZONE LOCK ---
+                import pytz
+                from datetime import datetime
+                ghana_tz = pytz.timezone('Africa/Accra')
+                now_ghana = datetime.now(ghana_tz)
+                
+                # Create entry using your local system's date and time
                 new_entry = {
                     'client_id': str(c_id),
                     'client_name': target,
                     'amount': float(db_amt),
-                    'date': trans_date.strftime('%Y-%m-%d'),
+                    'date': now_ghana.strftime('%Y-%m-%d %H:%M:%S'),
                     'fee': float(db_fee),
                     'marks_covered': int(db_marks)
                 }
 
                 if sync_data_dual(new_entry):
-                    st.success("✅ Transaction Successful!")
+                    st.success(f"✅ Transaction Synced at {now_ghana.strftime('%H:%M:%S')}!")
                     st.balloons()
                     
-                    # Digital Receipt (Formatted for immediate display)
+                    # Digital Receipt formatted for the popup
+                    t_date_str = now_ghana.strftime('%Y-%m-%d %H:%M')
                     receipt_html = f"""
-                    <div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
-                        <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
-                        <hr>
-                        <b>Date:</b> {trans_date.strftime('%Y-%m-%d')}<br>
-                        <b>Client:</b> {target}<br>
-                        <b>ID:</b> {c_id}<br>
-                        ---------------------------<br>
-                        <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
-                        <b>Fee:</b> GHS {db_fee:,.2f}<br>
-                        <b>Marks:</b> {db_marks}<br>
-                        ---------------------------<br>
-                        <b>New Balance:</b> GHS {total_saved_ghs + db_amt:,.2f}
-                    </div>
-                    <button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
-                    """
-                    components.html(receipt_html, height=400)
+<div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
+    <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
+    <hr>
+    <b>Date/Time:</b> {t_date_str}<br>
+    <b>Client:</b> {target}<br>
+    ---------------------------<br>
+    <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
+    <b>Marks:</b> {db_marks}<br>
+    ---------------------------<br>
+    <b>Verified Ghana Record</b>
+</div>
+<button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+"""
+                    components.html(receipt_html, height=350)
                     
-                    # Clear cache and wait so user can see receipt before the page refreshes
                     st.cache_data.clear()
-                    time.sleep(5) 
+                    import time
+                    time.sleep(5) # Gives you time to see the receipt before refresh
                     st.rerun()
 
         with col_refresh:
@@ -593,7 +600,7 @@ elif choice == "📑 Digital Passbook":
     query_id = str(uuid.uuid4()) 
     
     try:
-        # Fetching fresh data directly
+        # Force a fresh pull of data every time the tab is clicked
         contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
         clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
     except Exception as e:
@@ -614,12 +621,12 @@ elif choice == "📑 Digital Passbook":
             if 'contributions' in locals() and not contributions.empty:
                 df_temp = contributions[contributions['client_name'] == target].copy()
                 
-                # IMPROVED DATE/TIME PARSER
+                # DATE/TIME PARSER - FIXED: No "bare except"
                 def parse_date_with_time(date_val):
-                    if pd.isna(date_val) or date_val == "":
+                    if pd.isna(date_val) or date_val == "": 
                         return None
-                    # Try timestamp first, then plain date
-                    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M', '%Y-%m-%d'):
+                    formats = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M', '%Y-%m-%d')
+                    for fmt in formats:
                         try:
                             return pd.to_datetime(date_val, format=fmt)
                         except (ValueError, TypeError):
@@ -630,7 +637,6 @@ elif choice == "📑 Digital Passbook":
                 
                 total_marks = int(df_temp['marks_covered'].fillna(0).sum())
                 current_balance = float(df_temp['amount'].fillna(0).sum())
-                # Sort by date and time
                 user_history = df_temp.sort_values(by='date', ascending=False)
             else:
                 total_marks = 0
@@ -648,7 +654,6 @@ elif choice == "📑 Digital Passbook":
             st.subheader("📜 Recent Activity")
             if not user_history.empty:
                 for idx, row in user_history.iterrows():
-                    # Format for display: 2026-04-01 04:14
                     if pd.isna(row['date']):
                         t_date_str = "Unknown Date/Time"
                     else:
@@ -663,10 +668,8 @@ elif choice == "📑 Digital Passbook":
                             st.write(f"**Exact Date/Time:** {t_date_str}")
                             st.write(f"**Amount:** GHS {abs(t_amt):,.2f}")
                             st.write(f"**Marks:** {row['marks_covered']}")
-                            st.write(f"**Commission:** GHS {row.get('fee', 0.0):,.2f}")
 
                         with col_print:
-                            # Receipt using the full t_date_str
                             receipt_html = f"""
 <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 260px; padding: 10px; background: white; color: black; border: 1px solid #000;">
     <center><h4 style="margin:0;">RUCHANET SUSU</h4></center>
@@ -674,7 +677,6 @@ elif choice == "📑 Digital Passbook":
     <p style="font-size:12px;">
         <b>Date/Time:</b> {t_date_str}<br>
         <b>Client:</b> {target}<br>
-        <b>Type:</b> {t_type}<br>
         ----------------------------<br>
         <b>Amount:</b> GHS {abs(t_amt):,.2f}<br>
         <b>Marks:</b> {row['marks_covered']}<br>

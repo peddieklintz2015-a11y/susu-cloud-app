@@ -454,12 +454,19 @@ elif choice == "💸 Transactions":
     
     if not clients.empty:
         # 1. Selection UI
-        col_search, col_mode = st.columns([2, 1])
+        col_search, col_mode, col_date = st.columns([2, 1, 1])
         with col_search:
             client_list = clients['client_name'].tolist()
             target = st.selectbox("Select Client", client_list)
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
+        with col_date:
+            # --- MIGRATION LOGIC: BACKDATING ---
+            if is_migration:
+                trans_date = st.date_input("Select Transaction Date", value=datetime.now().date())
+            else:
+                trans_date = datetime.now().date()
+                st.info(f"Date: {trans_date}")
 
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
@@ -489,9 +496,7 @@ elif choice == "💸 Transactions":
         else: # --- WITHDRAWAL LOGIC ---
             w_method = st.selectbox("Withdrawal Method", ["Full Payout (Include Commission)", "Advance Payment (No Commission Now)"])
             
-            # Helper for the Agent
             if d_mark > 0:
-                # Tell them the absolute max they can take if they pay commission now
                 est_comm_marks = math.ceil(total_marks_saved / 32)
                 max_cash_possible = float((total_marks_saved - est_comm_marks) * d_mark)
                 st.success(f"💡 Max Cash (with Commission): GHS {max_cash_possible:,.2f}")
@@ -501,78 +506,80 @@ elif choice == "💸 Transactions":
             if d_mark > 0:
                 marks_for_cash = int(requested_cash / d_mark)
                 
-                # --- CALCULATE ACTUAL DB VALUES ---
                 if w_method == "Full Payout (Include Commission)":
                     num_commissions = math.ceil(marks_for_cash / 31)
                     db_fee = float(num_commissions * d_mark)
                     db_marks = -(marks_for_cash + num_commissions)
                 else:
-                    # Advance Payment: 0 fee now, but we check if they HAVE it
                     db_fee = 0.0
                     db_marks = -marks_for_cash
                 
                 db_amt = -float(requested_cash + db_fee)
 
-                # --- THE BOUNCER CHECK (The Shadow Commission) ---
-                # We calculate what the fee WOULD be (1 mark for every 31)
                 shadow_fee_marks = math.ceil(marks_for_cash / 31)
                 total_marks_needed_to_be_safe = marks_for_cash + shadow_fee_marks
                 
                 if requested_cash > 0:
-                    # BLOCK if they don't have enough marks to cover cash + the "shadow" fee
-                    if total_marks_saved < total_marks_needed_to_be_safe:
-                        st.error("🚫 **Insufficient Reserved Marks.**")
-                        st.write(f"To take GHS {requested_cash:,.2f}, the client needs **{total_marks_needed_to_be_safe} marks** "
-                                 f"(Cash: {marks_for_cash} + Commission: {shadow_fee_marks}).")
-                        st.write(f"Current Balance: **{total_marks_saved} marks**.")
-                        st.stop()
+                    # --- THE BOUNCER CHECK (Bypassed if Migration Mode is ON) ---
+                    if not is_migration:
+                        if total_marks_saved < total_marks_needed_to_be_safe:
+                            st.error("🚫 **Insufficient Reserved Marks.**")
+                            st.write(f"To take GHS {requested_cash:,.2f}, the client needs **{total_marks_needed_to_be_safe} marks**.")
+                            st.stop()
+                        
+                        if abs(db_amt) > (total_saved_ghs + 0.01):
+                            st.error(f"⚠️ **Insufficient Cash Balance.** Balance: GHS {total_saved_ghs:,.2f}")
+                            st.stop()
                     
-                    # BLOCK if they don't have the actual cash balance (for migrations/over-withdrawals)
-                    if abs(db_amt) > (total_saved_ghs + 0.01) and not is_migration:
-                        st.error(f"⚠️ **Insufficient Cash Balance.** Balance: GHS {total_saved_ghs:,.2f}")
-                        st.stop()
-                    
-                    # UI Final Confirmation
                     if w_method == "Advance Payment (No Commission Now)":
-                        st.warning(f"ℹ️ **Advance Mode**: Deducting {marks_for_cash} marks. "
-                                   f"{shadow_fee_marks} marks are reserved in the account for future commission.")
+                        st.warning(f"ℹ️ **Advance Mode**: Deducting {marks_for_cash} marks.")
                     else:
-                        st.warning(f"📉 **Full Payout**: Total Deduction GHS {abs(db_amt):,.2f} (Fee: {db_fee})")
+                        st.warning(f"📉 **Full Payout**: Total Deduction GHS {abs(db_amt):,.2f}")
 
-        # --- 3. SYNC & RECEIPT ---
-        if st.button("🚀 Confirm & Sync Transaction"):
-            new_entry = {
-                'client_id': str(c_id),
-                'client_name': target,
-                'amount': float(db_amt),
-                'date': datetime.now().isoformat(),
-                'fee': float(db_fee),
-                'marks_covered': int(db_marks)
-            }
+        # --- 3. SYNC, REFRESH & RECEIPT ---
+        col_confirm, col_refresh = st.columns(2)
+        
+        with col_confirm:
+            if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
+                # Use trans_date (from migration picker) instead of datetime.now()
+                new_entry = {
+                    'client_id': str(c_id),
+                    'client_name': target,
+                    'amount': float(db_amt),
+                    'date': trans_date.strftime('%Y-%m-%d'), 
+                    'fee': float(db_fee),
+                    'marks_covered': int(db_marks)
+                }
 
-            if sync_data_dual(new_entry):
-                st.success("✅ Transaction Saved!")
-                
-                # Digital Receipt for Thermal Printer
-                receipt_html = f"""
-                <div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
-                    <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
-                    <hr>
-                    <b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
-                    <b>Client:</b> {target}<br>
-                    <b>ID:</b> {c_id}<br>
-                    ---------------------------<br>
-                    <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
-                    <b>Fee:</b> GHS {db_fee:,.2f}<br>
-                    <b>Marks:</b> {db_marks}<br>
-                    ---------------------------<br>
-                    <b>New Balance:</b> GHS {total_saved_ghs + db_amt:,.2f}
-                </div>
-                <button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
-                """
-                components.html(receipt_html, height=400)
-                st.balloons()
-                time.sleep(1)
+                if sync_data_dual(new_entry):
+                    st.success("✅ Transaction Saved!")
+                    
+                    # Digital Receipt for Thermal Printer
+                    receipt_html = f"""
+                    <div style="font-family:monospace; width:260px; padding:10px; border:1px solid #000; background:white; color:black;">
+                        <center><h3 style="margin:0;">RUCHANET SUSU</h3></center>
+                        <hr>
+                        <b>Date:</b> {trans_date.strftime('%Y-%m-%d')}<br>
+                        <b>Client:</b> {target}<br>
+                        <b>ID:</b> {c_id}<br>
+                        ---------------------------<br>
+                        <b>Amount:</b> GHS {abs(float(requested_cash if ttype == 'Withdrawal' else db_amt)):,.2f}<br>
+                        <b>Fee:</b> GHS {db_fee:,.2f}<br>
+                        <b>Marks:</b> {db_marks}<br>
+                        ---------------------------<br>
+                        <b>New Balance:</b> GHS {total_saved_ghs + db_amt:,.2f}
+                    </div>
+                    <button onclick="window.print()" style="width:100%; padding:10px; margin-top:5px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
+                    """
+                    components.html(receipt_html, height=400)
+                    st.balloons()
+                    time.sleep(2)
+                    st.rerun()
+
+        with col_refresh:
+            if st.button("🔄 Sync & Refresh System", use_container_width=True):
+                st.rerun()
+
     else:
         st.warning("Please register clients first.")                 
 

@@ -840,83 +840,99 @@ elif choice == "🛠 Admin Tools":
     # --- TAB 4: MANAGE PROFILE (THE FIX) ---
     with t4:
         st.subheader("⚙️ Secure Client Profile Manager")
-        st.error("❗ Deletion removes the client and photo permanently.")
+        
+        # --- ADMIN VERIFICATION (2FA) ---
+        admin_pass_t4 = st.text_input("Enter Admin Password to access Profiles", type="password", key="t4_admin_pass")
 
-        # Everything below this is now correctly indented inside the "with t4" block
-        if 'clients' in locals() and not clients.empty:
-            search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
-            
-            filtered = clients[
-                clients['client_name'].str.contains(search_query, case=False) | 
-                clients['client_id'].astype(str).str.contains(search_query, case=False)
-            ]
+        if admin_pass_t4 == st.secrets["passwords"]["admin_password"]:
+            st.error("❗ Deletion removes the client and photo permanently.")
 
-            if not filtered.empty:
-                selected_name = st.selectbox("Select Profile:", filtered['client_name'])
-                c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-                target_id = str(c_data['client_id']) 
+            if 'clients' in locals() and not clients.empty:
+                search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
                 
-                final_balance = 0.0
-                if 'contributions' in locals() and not contributions.empty:
-                    u_history = contributions[contributions['client_name'] == selected_name]
-                    final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
+                filtered = clients[
+                    clients['client_name'].str.contains(search_query, case=False) | 
+                    clients['client_id'].astype(str).str.contains(search_query, case=False)
+                ]
 
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    photo_url = c_data.get('photo_url')
-                    if photo_url and str(photo_url) not in ['None', 'nan', '']:
-                        st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
-                with col2:
-                    st.write(f"*Name:* {c_data['client_name']}")
-                    st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
+                if not filtered.empty:
+                    selected_name = st.selectbox("Select Profile:", filtered['client_name'])
+                    c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
+                    target_id = str(c_data['client_id']) 
+                    
+                    final_balance = 0.0
+                    if 'contributions' in locals() and not contributions.empty:
+                        u_history = contributions[contributions['client_name'] == selected_name]
+                        final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
 
-                st.divider()
-                
-                confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
-                
-                if confirm_check:
-                    wipe_pass = st.text_input("🔐 Admin Password", type="password", key="wipe_pass_input")
-                    if st.button("💥 AUTHORIZE PERMANENT WIPE"):
-                        if wipe_pass == st.secrets["passwords"]["admin_password"]:
-                            try:
-                                with st.spinner("Wiping..."):
-                                    try:
-                                        safe_file = target_id.replace('/', '-')
-                                        sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
-                                    except Exception: 
-                                        pass 
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        photo_url = c_data.get('photo_url')
+                        if photo_url and str(photo_url) not in ['None', 'nan', '']:
+                            st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
+                    with col2:
+                        st.write(f"*Name:* {c_data['client_name']}")
+                        st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
 
-                                    with conn.session as s:
-                                        s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
-                                        s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
-                                        s.commit()
-                                
-                                st.success("🗑️ Erased successfully.")
-                                st.cache_data.clear()
-                                time.sleep(2)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"🚨 Wipe Failed: {e}")
+                    st.divider()
+                    
+                    # --- FINAL WIPE AUTHORIZATION ---
+                    confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
+                    
+                    if confirm_check:
+                        # Second verification for the actual action (True 2FA feel)
+                        wipe_pass = st.text_input("🔐 Re-enter Password to AUTHORIZE WIPE", type="password", key="wipe_pass_input")
+                        if st.button("💥 EXECUTE PERMANENT WIPE"):
+                            if wipe_pass == st.secrets["passwords"]["admin_password"]:
+                                try:
+                                    with st.spinner("Wiping..."):
+                                        try:
+                                            safe_file = target_id.replace('/', '-')
+                                            sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
+                                        except Exception: 
+                                            pass 
+
+                                        with conn.session as s:
+                                            s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
+                                            s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
+                                            s.commit()
+                                    
+                                    st.success("🗑️ Erased successfully.")
+                                    st.cache_data.clear()
+                                    time.sleep(2)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"🚨 Wipe Failed: {e}")
+                else:
+                    st.info("No matching profiles.")
             else:
-                st.info("No matching profiles.")
-        else:
-            st.info("Database empty.")
+                st.info("Database empty.")
+        elif admin_pass_t4 != "":
+            st.warning("Incorrect Admin Password.")
 
     # --- TAB 5: RESET SYSTEM ---
     with t5:
         st.header("🧨 Factory Reset")
-        confirm_reset = st.checkbox("I want to delete EVERYTHING.", key="wipe_confirm_check")
+        st.warning("This will permanently delete all records, clients, and logs.")
         
-        if st.button("EXECUTE FULL RESET", type="primary", disabled=not confirm_reset):
-            try:
-                with conn.session as s:
-                    s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
-                    s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
-                    s.execute(text("TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;"))
-                    s.commit()
-                st.success("💥 System wiped!")
-                st.cache_data.clear()
-                time.sleep(2)
-                st.rerun()
-            except Exception as e:
-                st.error(f"Reset failed: {e}")
+        # Double-lock reset
+        confirm_reset = st.checkbox("I understand this action is IRREVERSIBLE.", key="wipe_confirm_check")
+        reset_pass = st.text_input("Enter Admin Password to UNLOCK RESET", type="password", key="reset_pass_gate")
+        
+        if st.button("🚨 EXECUTE FULL SYSTEM WIPE", type="primary", disabled=not confirm_reset):
+            if reset_pass == st.secrets["passwords"]["admin_password"]:
+                try:
+                    with conn.session as s:
+                        # Cascading truncate to clean the entire DB
+                        s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
+                        s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
+                        s.execute(text("TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;"))
+                        s.commit()
+                    st.success("💥 System wiped successfully!")
+                    st.cache_data.clear()
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Reset failed: {e}")
+            else:
+                st.error("Invalid password. Reset aborted.")

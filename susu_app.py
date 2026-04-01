@@ -629,7 +629,7 @@ elif choice == "💸 Transactions":
                     
                     st.cache_data.clear()
                     import time
-                    time.sleep(5) 
+                    time.sleep(7) 
                     st.rerun()
 
         with col_refresh:
@@ -782,7 +782,7 @@ elif choice == "🛠 Admin Tools":
                         
                         st.success(f"✅ Registered {name} with ID: {final_id}")
                         st.balloons()
-                        time.sleep(2)
+                        time.sleep(4)
                         st.rerun()
                     except Exception as e:
                         st.error(f"🚨 Registration Failed: {e}")
@@ -873,7 +873,7 @@ elif choice == "🛠 Admin Tools":
                                     s.commit()
                                 st.success("✅ Reversal Synced!")
                                 st.cache_data.clear()
-                                time.sleep(2)
+                                time.sleep(3)
                                 st.rerun()
                         except Exception as e:
                             st.error(f"🚨 Reversal Failed: {e}")
@@ -940,7 +940,7 @@ elif choice == "🛠 Admin Tools":
                                     
                                     st.success("🗑️ Erased successfully.")
                                     st.cache_data.clear()
-                                    time.sleep(2)
+                                    time.sleep(4)
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"🚨 Wipe Failed: {e}")
@@ -971,7 +971,7 @@ elif choice == "🛠 Admin Tools":
                         s.commit()
                     st.success("💥 System wiped successfully!")
                     st.cache_data.clear()
-                    time.sleep(2)
+                    time.sleep(5)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Reset failed: {e}")

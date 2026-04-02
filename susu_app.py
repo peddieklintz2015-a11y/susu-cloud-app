@@ -195,59 +195,6 @@ def fetch_data():
 # --- 1. THE SECURITY WALL ---
 def check_password():
     if "role" not in st.session_state:
-        # 1. Global CSS Fix for iPhone Safari and Windows
-        st.markdown(
-            """
-            <style>
-                /* Force Dark Background */
-                .stApp {
-                    background-color: #0E1117 !important;
-                }
-
-                /* Force All Text to be White (Fixes Ghosting) */
-                h1, h2, h3, p, label, span, .stMarkdown p {
-                    color: #FFFFFF !important;
-                    -webkit-text-fill-color: #FFFFFF !important;
-                }
-
-                /* THE IPHONE BUTTON FIX */
-                /* Targeting 'primary' buttons inside forms to kill the white-block effect */
-                div[data-testid="stForm"] button[kind="primary"],
-                button[data-testid="baseButton-primary"] {
-                    background-color: #FF484B !important; /* Your brand red */
-                    color: #FFFFFF !important;           /* White text */
-                    -webkit-text-fill-color: #FFFFFF !important;
-                    border: none !important;
-                    border-radius: 8px !important;
-                    -webkit-appearance: none !important; /* Forces Safari to drop system styling */
-                    opacity: 1 !important;
-                    visibility: visible !important;
-                    height: 3rem !important;
-                    width: 100% !important;
-                    font-weight: 700 !important;
-                }
-
-                /* Ensure text inside the button is forced white */
-                button[data-testid="baseButton-primary"] p {
-                    color: #FFFFFF !important;
-                    -webkit-text-fill-color: #FFFFFF !important;
-                }
-
-                /* Fix for Input Fields visibility */
-                .stTextInput input {
-                    background-color: #1E293B !important;
-                    color: #FFFFFF !important;
-                    -webkit-text-fill-color: #FFFFFF !important;
-                    border: 1px solid #475569 !important;
-                }
-                
-                /* Hide sidebar on login */
-                [data-testid='stSidebar'] {display: none;}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        
         st.title("🔐 RUCHANET SYSTEM LOGIN")
         col1, col2 = st.columns(2)
         
@@ -814,10 +761,12 @@ elif choice == "🛠 Admin Tools":
 # --- TAB 1: REGISTRATION (Camera + Library Upload) ---
     with t1:
         st.subheader("👤 Register New Client")
-        st.write("📸 *Step 1: Get Client Photo*")
         
-        # Unique key for the radio button
-        reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_photo_source")
+        # 1. Provide two ways to get the photo
+        st.write("📸 **Step 1: Get Client Photo**")
+        
+        # Unique key added to prevent conflict
+        reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_src_selection")
         
         photo = None
         if reg_choice == "Live Camera":
@@ -825,8 +774,9 @@ elif choice == "🛠 Admin Tools":
         else:
             photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
 
+        # 2. The Registration Form
         with st.form("reg_form", clear_on_submit=True):
-            st.write("📝 *Step 2: Client Details*")
+            st.write("📝 **Step 2: Client Details**")
             name = st.text_input("Full Name")
             phone = st.text_input("Phone Number")
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
@@ -835,6 +785,7 @@ elif choice == "🛠 Admin Tools":
             suggested_id = get_next_gen_id(reg_date)
             manual_id = st.text_input("Confirm Client ID", value=suggested_id)
             
+            # primary type prevents the 'White Block' bug on iPhone
             submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
             
             if submit: 
@@ -842,24 +793,43 @@ elif choice == "🛠 Admin Tools":
                     st.error("❌ Name, Phone, and Photo are all required.")
                 else:
                     try:
+                        # NEW: IMAGE COMPRESSION (Fixes 413 Payload Error)
+                        from PIL import Image
+                        import io
+                        
+                        img = Image.open(photo)
+                        if img.mode in ("RGBA", "P"): 
+                            img = img.convert("RGB")
+                        
+                        # Shrink image to 800px max (Perfect for mobile/cloud)
+                        img.thumbnail((800, 800)) 
+                        
+                        buffer = io.BytesIO()
+                        img.save(buffer, format="JPEG", quality=70) 
+                        compressed_bytes = buffer.getvalue()
+                        # -----------------------------------------------
+
                         final_id = manual_id.strip() if manual_id.strip() else suggested_id
                         safe_filename = f"{final_id.replace('/', '-')}.jpg"
-                        file_bytes = photo.getvalue()
                         
+                        # Upload compressed bytes to Supabase
                         sb_client.storage.from_("client-photos").upload(
                             path=safe_filename,
-                            file=file_bytes,
+                            file=compressed_bytes,
                             file_options={"content-type": "image/jpeg", "upsert": "true"}
                         )
 
                         base_url = st.secrets['supabase_url']
                         p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
+                        # Save to DB
                         with conn.session as s:
                             s.execute(text("""
                                 INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
                                 VALUES (:i, :n, :p, :d, :u)
-                            """), {"i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                            """), {
+                                "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
+                            })
                             s.commit()
                         
                         st.success(f"✅ Registered {name}")

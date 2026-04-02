@@ -359,41 +359,37 @@ def generate_susu_receipt(idx, date_val, client_name, amount, marks, bal_after=N
     return components.html(receipt_html, height=400)
 
 def get_next_gen_id(reg_date):
-    # Format month and year: e.g., "03/26"
+    # Format suffix based on the chosen date: e.g., "04/26"
     mm_yy = reg_date.strftime("%m/%y")
     
     try:
         with conn.session as s:
-            # IMPROVED: We fetch all IDs for the month and handle the "highest" logic in Python
-            # to avoid SQL text-sorting errors (where '9' > '10')
+            # Look for IDs that end with the specific month/year chosen
             result = s.execute(text("""
                 SELECT client_id FROM clients 
                 WHERE client_id LIKE :pattern
             """), {"pattern": f"%/{mm_yy}"}).fetchall()
             
             if result:
-                # Extract the numeric part of each ID: e.g., "005" from "005/03/26"
                 nums = []
                 for row in result:
                     try:
-                        nums.append(int(row[0].split('/')[0]))
+                        # Extract the prefix (e.g., "159" from "159/04/26")
+                        prefix = int(row[0].split('/')[0])
+                        nums.append(prefix)
                     except (ValueError, IndexError):
                         continue
                 
-                if nums:
-                    new_num = max(nums) + 1
-                else:
-                    new_num = 1
+                # Next number for THIS specific month
+                new_num = max(nums) + 1 if nums else 1
             else:
-                # First client of the month
+                # No records found for this month yet, start at 1
                 new_num = 1
                 
-            # Return formatted as 3 digits: "001/03/26"
             return f"{new_num:03d}/{mm_yy}"
             
     except Exception as e:
         st.error(f"⚠️ ID Generation Error: {e}") 
-        # Fallback to 001 if something goes wrong
         return f"001/{mm_yy}"
 
 # Initialize combined_df as empty or just contributions to start
@@ -759,85 +755,86 @@ elif choice == "🛠 Admin Tools":
     t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
 # --- TAB 1: REGISTRATION (Camera + Library Upload) ---
-    with t1:
-        st.subheader("👤 Register New Client")
+with t1:
+    st.subheader("👤 Register New Client")
+    
+    st.write("📸 **Step 1: Get Client Photo**")
+    reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_src_selection")
+    
+    photo = None
+    if reg_choice == "Live Camera":
+        photo = st.camera_input("Take Photo")
+    else:
+        photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
+
+    # 2. The Registration Form
+    with st.form("reg_form", clear_on_submit=True):
+        st.write("📝 **Step 2: Client Details**")
+        name = st.text_input("Full Name")
+        phone = st.text_input("Phone Number")
+        daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
         
-        # 1. Provide two ways to get the photo
-        st.write("📸 **Step 1: Get Client Photo**")
+        # When you change this date, the ID suggestion below will adapt after submission 
+        # or if you move this outside the form for real-time updates.
+        reg_date = st.date_input("Registration Date", value=datetime.now())
         
-        # Unique key added to prevent conflict
-        reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_src_selection")
+        # Generate suggestion
+        suggested_id = get_next_gen_id(reg_date)
         
-        photo = None
-        if reg_choice == "Live Camera":
-            photo = st.camera_input("Take Photo")
-        else:
-            photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
+        # MANUAL OVERRIDE: Users can delete the suggestion and type "159/01/26"
+        manual_id = st.text_input("Confirm/Edit Client ID", value=suggested_id, help="You can manually edit this for backdating.")
+        
+        submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
+        
+        if submit: 
+            if not name.strip() or not phone.strip() or photo is None:
+                st.error("❌ Name, Phone, and Photo are all required.")
+            else:
+                try:
+                    # --- IMAGE PROCESSING ---
+                    from PIL import Image
+                    import io
+                    
+                    img = Image.open(photo)
+                    if img.mode in ("RGBA", "P"): 
+                        img = img.convert("RGB")
+                    
+                    img.thumbnail((800, 800)) 
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=70) 
+                    compressed_bytes = buffer.getvalue()
 
-        # 2. The Registration Form
-        with st.form("reg_form", clear_on_submit=True):
-            st.write("📝 **Step 2: Client Details**")
-            name = st.text_input("Full Name")
-            phone = st.text_input("Phone Number")
-            daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
-            reg_date = st.date_input("Registration Date", value=datetime.now())
-            
-            suggested_id = get_next_gen_id(reg_date)
-            manual_id = st.text_input("Confirm Client ID", value=suggested_id)
-            
-            # primary type prevents the 'White Block' bug on iPhone
-            submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
-            
-            if submit: 
-                if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ Name, Phone, and Photo are all required.")
-                else:
-                    try:
-                        # NEW: IMAGE COMPRESSION (Fixes 413 Payload Error)
-                        from PIL import Image
-                        import io
-                        
-                        img = Image.open(photo)
-                        if img.mode in ("RGBA", "P"): 
-                            img = img.convert("RGB")
-                        
-                        # Shrink image to 800px max (Perfect for mobile/cloud)
-                        img.thumbnail((800, 800)) 
-                        
-                        buffer = io.BytesIO()
-                        img.save(buffer, format="JPEG", quality=70) 
-                        compressed_bytes = buffer.getvalue()
-                        # -----------------------------------------------
+                    # --- ID FINALIZATION ---
+                    # Uses manual_id if the user typed something, otherwise uses suggested_id
+                    final_id = manual_id.strip() if manual_id.strip() else suggested_id
+                    safe_filename = f"{final_id.replace('/', '-')}.jpg"
+                    
+                    # --- STORAGE UPLOAD ---
+                    sb_client.storage.from_("client-photos").upload(
+                        path=safe_filename,
+                        file=compressed_bytes,
+                        file_options={"content-type": "image/jpeg", "upsert": "true"}
+                    )
 
-                        final_id = manual_id.strip() if manual_id.strip() else suggested_id
-                        safe_filename = f"{final_id.replace('/', '-')}.jpg"
-                        
-                        # Upload compressed bytes to Supabase
-                        sb_client.storage.from_("client-photos").upload(
-                            path=safe_filename,
-                            file=compressed_bytes,
-                            file_options={"content-type": "image/jpeg", "upsert": "true"}
-                        )
+                    base_url = st.secrets['supabase_url']
+                    p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
-                        base_url = st.secrets['supabase_url']
-                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
-
-                        # Save to DB
-                        with conn.session as s:
-                            s.execute(text("""
-                                INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                VALUES (:i, :n, :p, :d, :u)
-                            """), {
-                                "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
-                            })
-                            s.commit()
-                        
-                        st.success(f"✅ Registered {name}")
-                        st.balloons()
-                        time.sleep(2)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"🚨 Registration Failed: {e}")
+                    # --- DATABASE INSERT ---
+                    with conn.session as s:
+                        s.execute(text("""
+                            INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                            VALUES (:i, :n, :p, :d, :u)
+                        """), {
+                            "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
+                        })
+                        s.commit()
+                    
+                    st.success(f"✅ Registered {name} as ID: {final_id}")
+                    st.balloons()
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"🚨 Registration Failed: {e}")
 
     # --- TAB 2: REPORTS ---
     with t2:

@@ -359,12 +359,13 @@ def generate_susu_receipt(idx, date_val, client_name, amount, marks, bal_after=N
     return components.html(receipt_html, height=400)
 
 def get_next_gen_id(reg_date):
-    # Format suffix based on the chosen date: e.g., "04/26"
+    # 1. Get the month/year suffix from the user's chosen date (e.g., "01/26")
     mm_yy = reg_date.strftime("%m/%y")
     
     try:
         with conn.session as s:
-            # Look for IDs that end with the specific month/year chosen
+            # 2. Find all IDs that ALREADY exist for this specific month/year
+            # This ensures if you pick Jan, it counts Jan; if you pick Feb, it counts Feb.
             result = s.execute(text("""
                 SELECT client_id FROM clients 
                 WHERE client_id LIKE :pattern
@@ -374,18 +375,20 @@ def get_next_gen_id(reg_date):
                 nums = []
                 for row in result:
                     try:
-                        # Extract the prefix (e.g., "159" from "159/04/26")
+                        # 3. Extract the prefix number (the part before the first '/')
+                        # Splits "159/01/26" into "159"
                         prefix = int(row[0].split('/')[0])
                         nums.append(prefix)
                     except (ValueError, IndexError):
                         continue
                 
-                # Next number for THIS specific month
+                # 4. Find the highest number in THAT month and add 1
                 new_num = max(nums) + 1 if nums else 1
             else:
-                # No records found for this month yet, start at 1
+                # 5. If no clients exist for this month yet, start at 1
                 new_num = 1
                 
+            # Return as 3 digits: "001/01/26"
             return f"{new_num:03d}/{mm_yy}"
             
     except Exception as e:
@@ -758,6 +761,7 @@ elif choice == "🛠 Admin Tools":
 with t1:
     st.subheader("👤 Register New Client")
     
+    # --- STEP 1: PHOTO ---
     st.write("📸 **Step 1: Get Client Photo**")
     reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_src_selection")
     
@@ -765,24 +769,26 @@ with t1:
     if reg_choice == "Live Camera":
         photo = st.camera_input("Take Photo")
     else:
-        photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
+        photo = st.file_uploader("Select Image", type=["jpg", "jpeg", "png"])
 
-    # 2. The Registration Form
+    # --- STEP 2: DATE (Moved outside form for reactivity) ---
+    st.write("📅 **Step 2: Selection Date**")
+    # Choosing the date here immediately triggers the ID generation function below
+    reg_date = st.date_input("Registration Date", value=datetime.now(), key="reg_date_selector")
+    
+    # This recalculates every time 'reg_date' changes
+    suggested_id = get_next_gen_id(reg_date)
+
+    # --- STEP 3: THE FORM ---
     with st.form("reg_form", clear_on_submit=True):
-        st.write("📝 **Step 2: Client Details**")
+        st.write("📝 **Step 3: Client Details**")
         name = st.text_input("Full Name")
         phone = st.text_input("Phone Number")
         daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
         
-        # When you change this date, the ID suggestion below will adapt after submission 
-        # or if you move this outside the form for real-time updates.
-        reg_date = st.date_input("Registration Date", value=datetime.now())
-        
-        # Generate suggestion
-        suggested_id = get_next_gen_id(reg_date)
-        
-        # MANUAL OVERRIDE: Users can delete the suggestion and type "159/01/26"
-        manual_id = st.text_input("Confirm/Edit Client ID", value=suggested_id, help="You can manually edit this for backdating.")
+        # This shows the suggested ID (e.g., 001/01/26), but you can 
+        # click in the box, delete it, and type "159/01/26" manually.
+        manual_id = st.text_input("Confirm/Edit Client ID", value=suggested_id)
         
         submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
         
@@ -791,25 +797,23 @@ with t1:
                 st.error("❌ Name, Phone, and Photo are all required.")
             else:
                 try:
-                    # --- IMAGE PROCESSING ---
+                    # IMAGE COMPRESSION
                     from PIL import Image
                     import io
-                    
                     img = Image.open(photo)
-                    if img.mode in ("RGBA", "P"): 
+                    if img.mode in ("RGBA", "P"):
                         img = img.convert("RGB")
-                    
                     img.thumbnail((800, 800)) 
                     buffer = io.BytesIO()
                     img.save(buffer, format="JPEG", quality=70) 
                     compressed_bytes = buffer.getvalue()
 
-                    # --- ID FINALIZATION ---
-                    # Uses manual_id if the user typed something, otherwise uses suggested_id
+                    # ID FINALIZATION
+                    # Logic: If you typed something manually, use it. Otherwise, use the system suggestion.
                     final_id = manual_id.strip() if manual_id.strip() else suggested_id
                     safe_filename = f"{final_id.replace('/', '-')}.jpg"
                     
-                    # --- STORAGE UPLOAD ---
+                    # UPLOAD TO SUPABASE
                     sb_client.storage.from_("client-photos").upload(
                         path=safe_filename,
                         file=compressed_bytes,
@@ -819,7 +823,7 @@ with t1:
                     base_url = st.secrets['supabase_url']
                     p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
-                    # --- DATABASE INSERT ---
+                    # SAVE TO DATABASE
                     with conn.session as s:
                         s.execute(text("""
                             INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
@@ -831,7 +835,7 @@ with t1:
                     
                     st.success(f"✅ Registered {name} as ID: {final_id}")
                     st.balloons()
-                    time.sleep(4)
+                    time.sleep(1)
                     st.rerun()
                 except Exception as e:
                     st.error(f"🚨 Registration Failed: {e}")

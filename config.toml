@@ -1,20 +1,21 @@
 [theme]
-# Matches your brand red/orange
+# Your brand color
 primaryColor = "#FF484B"
 
-# Deep dark background (Matches your CSS)
+# The main background (Deep Black)
 backgroundColor = "#0E1117"
 
-# Lighter grey so buttons/inputs are naturally visible on mobile
+# The button/input background (Dark Slate)
+# This MUST be a dark color so text stays white on top of it
 secondaryBackgroundColor = "#262730"
 
-# Pure white for all base text
+# The default text color
 textColor = "#FFFFFF"
 
 # Fallback font
 font = "sans serif"
 
-# Critical: tells Streamlit to use Dark Mode logic globally
+# Essential for mobile: tells Streamlit to use Dark logic for all widgets
 base = "dark"
 
 [server]

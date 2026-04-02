@@ -101,45 +101,45 @@ st.markdown(
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0E1117">
     <style>
-        /* 1. Universal Background Fix */
+        /* 1. Global Background */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Fix All Text Visibility (Headers, Paragraphs, Labels) */
-        h1, h2, h3, h4, h5, h6, p, label, .stWidgetLabel p, .stMarkdown p {
+        /* 2. Force All Text Visibility */
+        h1, h2, h3, h4, p, label, span, .stMarkdown p {
             color: #FFFFFF !important;
             opacity: 1 !important;
         }
 
-        /* 3. Fix Button Visibility (The "Access Collector Tools" issue) */
-        /* This ensures the button has a visible background and white text by default */
-        div.stButton > button:first-child {
-            background-color: #1E293B !important; /* Slate grey background */
-            color: #FFFFFF !important;           /* White text */
-            border: 1px solid #334155 !important; /* Subtle border */
-            border-radius: 8px !important;
-            padding: 0.5rem 1rem !important;
-            transition: background-color 0.3s ease !important;
+        /* 3. THE BUTTON FIX: Target the internal 'baseButton' class */
+        /* This forces the button to be visible even without a mouse over it */
+        button[kind="secondary"], button[kind="primary"], .stButton button {
+            background-color: #1E293B !important; /* Visible dark grey */
+            color: #FFFFFF !important;           /* Visible white text */
+            border: 1px solid #475569 !important; /* Border to define the shape */
+            opacity: 1 !important;               /* Prevent transparency */
+            visibility: visible !important;
+            display: inline-flex !important;
         }
 
-        /* 4. Button Hover State (For visual feedback) */
-        div.stButton > button:first-child:hover {
+        /* 4. Ensure button text inside the button is white */
+        .stButton button p, .stButton button span {
+            color: #FFFFFF !important;
+        }
+
+        /* 5. Hover state for a better look */
+        button[kind="secondary"]:hover, .stButton button:hover {
             background-color: #334155 !important;
-            border-color: #FACC15 !important; /* Yellow border on hover */
-            color: #FACC15 !important;        /* Yellow text on hover */
+            border-color: #FACC15 !important;
+            color: #FACC15 !important;
         }
 
-        /* 5. Fix Input Fields (So you can see where to type) */
-        .stTextInput input, .stSelectbox div[data-baseweb="select"] {
-            color: #FFFFFF !important;
+        /* 6. Input Field Fixes */
+        .stTextInput input {
             background-color: #1E293B !important;
-            border: 1px solid #334155 !important;
-        }
-
-        /* 6. Fix for Checkboxes and Radio Buttons */
-        .stCheckbox label, .stRadio label {
             color: #FFFFFF !important;
+            border: 1px solid #334155 !important;
         }
     </style>
     """,

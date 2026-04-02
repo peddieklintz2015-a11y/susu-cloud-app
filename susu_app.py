@@ -831,7 +831,7 @@ with t1:
                     
                     st.success(f"✅ Registered {name} as ID: {final_id}")
                     st.balloons()
-                    time.sleep(2)
+                    time.sleep(4)
                     st.rerun()
                 except Exception as e:
                     st.error(f"🚨 Registration Failed: {e}")

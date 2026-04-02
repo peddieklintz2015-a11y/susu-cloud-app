@@ -1,27 +1,22 @@
 [theme]
-# The vibrant red/orange from your logo/button
+# Matches your brand red/orange
 primaryColor = "#FF484B"
 
-# The deep dark background
+# Deep dark background (Matches your CSS)
 backgroundColor = "#0E1117"
 
-# A slightly lighter grey for cards, sidebars, and input areas
-secondaryBackgroundColor = "#1E293B"
+# Lighter grey so buttons/inputs are naturally visible on mobile
+secondaryBackgroundColor = "#262730"
 
-# High-contrast white for all text
+# Pure white for all base text
 textColor = "#FFFFFF"
 
-# Standard fallback font (Our CSS will override this with 'Inter')
+# Fallback font
 font = "sans serif"
 
-# Forces the built-in Streamlit widgets to use Dark Mode logic
+# Critical: tells Streamlit to use Dark Mode logic globally
 base = "dark"
 
 [server]
-# Keeps the app running smoothly without security pop-ups in some environments
 enableCORS = false
 enableXsrfProtection = false
-
-[server]
-enableCORS = false
-enableXsrfprotection = false

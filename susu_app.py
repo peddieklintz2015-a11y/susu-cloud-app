@@ -99,51 +99,43 @@ st.markdown(
 st.markdown(
     """
     <style>
-        /* 1. Import a Professional Google Font (Inter) */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-        /* 2. Apply Font to the entire App */
-        html, body, [class*="css"], .stApp {
-            font-family: 'Inter', sans-serif !important;
-        }
-
-        /* 3. Global Background & Text Visibility */
+        /* 1. Global Background & Text */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        h1, h2, h3, h4, p, label, .stMarkdown p {
+        /* 2. Force iPhone to show text properly */
+        h1, h2, h3, p, label, .stMarkdown p {
             color: #FFFFFF !important;
-            font-family: 'Inter', sans-serif !important;
-            letter-spacing: -0.01em; /* Makes professional fonts look tighter */
+            -webkit-text-fill-color: #FFFFFF !important; /* iPhone specific */
         }
 
-        /* 4. Button Visibility Fix (The 'Ghost' Button Fix) */
-        button[data-testid="baseButton-secondary"], 
-        button[data-testid="baseButton-primary"],
-        .stButton > button {
-            background-color: #1E293B !important; 
-            color: white !important;
+        /* 3. THE BUTTON FIX (iOS Specific) */
+        /* This targets the button in its NATURAL state before any tap occurs */
+        div.stButton > button, 
+        button[data-testid="baseButton-secondary"],
+        button[data-testid="baseButton-primary"] {
+            background-color: #262730 !important; /* Dark Grey box */
+            color: #FFFFFF !important;           /* White text */
+            -webkit-text-fill-color: #FFFFFF !important; 
             border: 1px solid #475569 !important;
-            font-weight: 500 !important; /* Professional weight */
-            font-family: 'Inter', sans-serif !important;
-            border-radius: 8px !important;
-            transition: all 0.2s ease-in-out !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+            /* Prevents iOS from adding a gray shadow/gradient */
+            -webkit-appearance: none !important; 
         }
 
-        /* 5. Professional Hover Effect */
-        button[data-testid="baseButton-secondary"]:hover,
-        button[data-testid="baseButton-primary"]:hover {
-            border-color: #FF484B !important;
-            background-color: #1E293B !important;
-            box-shadow: 0 0 10px rgba(255, 72, 75, 0.2) !important;
+        /* 4. Force the text inside the button to be white */
+        div.stButton > button p, 
+        div.stButton > button span {
+            color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
         }
-        
-        /* 6. Fix input field text font */
-        .stTextInput input {
-            font-family: 'Inter', sans-serif !important;
-            background-color: #1E293B !important;
-            color: white !important;
+
+        /* 5. Feedback when tapped (Optional but nice) */
+        div.stButton > button:active {
+            background-color: #FF484B !important; /* Turns red when tapped */
+            color: #FFFFFF !important;
         }
     </style>
     """,

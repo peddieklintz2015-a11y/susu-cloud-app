@@ -101,24 +101,45 @@ st.markdown(
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0E1117">
     <style>
-        /* 1. Force the background to stay dark */
+        /* 1. Universal Background Fix */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Fix the Text! This forces ALL text in the app to be White/Off-White */
-        .stApp, .stMarkdown, p, label, .stWidgetLabel {
-            color: #FAFAFA !important;
-        }
-
-        /* 3. Ensure Headers (like "Record Transactions") are bright white */
-        h1, h2, h3, h4 {
+        /* 2. Fix All Text Visibility (Headers, Paragraphs, Labels) */
+        h1, h2, h3, h4, h5, h6, p, label, .stWidgetLabel p, .stMarkdown p {
             color: #FFFFFF !important;
+            opacity: 1 !important;
         }
 
-        /* 4. Optional: Make small captions slightly dimmer so they don't glow too much */
-        .stCaption {
-            color: #A1A1AA !important;
+        /* 3. Fix Button Visibility (The "Access Collector Tools" issue) */
+        /* This ensures the button has a visible background and white text by default */
+        div.stButton > button:first-child {
+            background-color: #1E293B !important; /* Slate grey background */
+            color: #FFFFFF !important;           /* White text */
+            border: 1px solid #334155 !important; /* Subtle border */
+            border-radius: 8px !important;
+            padding: 0.5rem 1rem !important;
+            transition: background-color 0.3s ease !important;
+        }
+
+        /* 4. Button Hover State (For visual feedback) */
+        div.stButton > button:first-child:hover {
+            background-color: #334155 !important;
+            border-color: #FACC15 !important; /* Yellow border on hover */
+            color: #FACC15 !important;        /* Yellow text on hover */
+        }
+
+        /* 5. Fix Input Fields (So you can see where to type) */
+        .stTextInput input, .stSelectbox div[data-baseweb="select"] {
+            color: #FFFFFF !important;
+            background-color: #1E293B !important;
+            border: 1px solid #334155 !important;
+        }
+
+        /* 6. Fix for Checkboxes and Radio Buttons */
+        .stCheckbox label, .stRadio label {
+            color: #FFFFFF !important;
         }
     </style>
     """,

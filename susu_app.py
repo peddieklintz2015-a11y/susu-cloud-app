@@ -100,44 +100,32 @@ st.markdown(
     """
     <style>
         /* 1. Global Dark Background */
-        .stApp {
-            background-color: #0E1117 !important;
-        }
+        .stApp { background-color: #0E1117 !important; }
 
-        /* 2. Force White Text for iPhone visibility */
+        /* 2. Force White Text */
         h1, h2, h3, p, label, span, .stMarkdown p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
         }
 
-        /* 3. THE FORM BUTTON FIX */
-        /* Targets buttons inside st.form specifically for Webkit/Safari */
-        div[data-testid="stForm"] button[kind="primary"],
-        button[data-testid="baseButton-primary"] {
-            background-color: #FF484B !important; /* Your brand red */
-            color: #FFFFFF !important;           /* White text */
+        /* 3. THE BUTTON FIX - Targeted to exclude header icons */
+        /* We target buttons that are NOT inside the header */
+        div:not([data-testid="stHeader"]) button[kind="primary"],
+        div:not([data-testid="stHeader"]) button[data-testid="baseButton-primary"] {
+            background-color: #FF484B !important; 
+            color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
             border: none !important;
             border-radius: 8px !important;
-            -webkit-appearance: none !important;  /* Stops Safari 'White Block' effect */
+            -webkit-appearance: none !important;
             box-shadow: none !important;
-            opacity: 1 !important;
-            visibility: visible !important;
         }
 
-        /* 4. Ensure button text is bold and white */
-        button[data-testid="baseButton-primary"] p {
-            color: #FFFFFF !important;
-            -webkit-text-fill-color: #FFFFFF !important;
-            font-weight: 700 !important;
-        }
-
-        /* 5. Fix the input field background */
-        .stTextInput input {
-            background-color: #1E293B !important;
-            color: #FFFFFF !important;
-            -webkit-text-fill-color: #FFFFFF !important;
-            border: 1px solid #475569 !important;
+        /* 4. Fix the Search/Download icons in Dataframes */
+        /* This ensures the icons remain visible on the dark background */
+        button[title="Download as CSV"], button[title="Search"] {
+            background-color: transparent !important;
+            color: white !important;
         }
     </style>
     """,
@@ -824,72 +812,62 @@ elif choice == "🛠 Admin Tools":
     t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
 # --- TAB 1: REGISTRATION (Camera + Library Upload) ---
-with t1:
-    st.subheader("👤 Register New Client")
-    
-    # 1. Provide two ways to get the photo
-    st.write("📸 **Step 1: Get Client Photo**")
-    
-    # Create two columns for the choices
-    choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True)
-    
-    photo = None
-    if choice == "Live Camera":
-        photo = st.camera_input("Take Photo")
-    else:
-        photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
-
-    # 2. The Registration Form
-    with st.form("reg_form", clear_on_submit=True):
-        st.write("📝 **Step 2: Client Details**")
-        name = st.text_input("Full Name")
-        phone = st.text_input("Phone Number")
-        daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
-        reg_date = st.date_input("Registration Date", value=datetime.now())
+    with t1:
+        st.subheader("👤 Register New Client")
+        st.write("📸 *Step 1: Get Client Photo*")
         
-        suggested_id = get_next_gen_id(reg_date)
-        manual_id = st.text_input("Confirm Client ID", value=suggested_id)
+        # Unique key for the radio button
+        reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_photo_source")
         
-        # We keep type="primary" to prevent the 'White Block' bug on iPhone
-        submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
-        
-        if submit: 
-            if not name.strip() or not phone.strip() or photo is None:
-                st.error("❌ Name, Phone, and Photo are all required.")
-            else:
-                try:
-                    final_id = manual_id.strip() if manual_id.strip() else suggested_id
-                    safe_filename = f"{final_id.replace('/', '-')}.jpg"
-                    
-                    # Process the file (works for both camera and uploader)
-                    file_bytes = photo.getvalue()
-                    
-                    # Upload to Supabase 'client-photos' bucket
-                    sb_client.storage.from_("client-photos").upload(
-                        path=safe_filename,
-                        file=file_bytes,
-                        file_options={"content-type": "image/jpeg", "upsert": "true"}
-                    )
+        photo = None
+        if reg_choice == "Live Camera":
+            photo = st.camera_input("Take Photo")
+        else:
+            photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
 
-                    base_url = st.secrets['supabase_url']
-                    p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
+        with st.form("reg_form", clear_on_submit=True):
+            st.write("📝 *Step 2: Client Details*")
+            name = st.text_input("Full Name")
+            phone = st.text_input("Phone Number")
+            daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
+            reg_date = st.date_input("Registration Date", value=datetime.now())
+            
+            suggested_id = get_next_gen_id(reg_date)
+            manual_id = st.text_input("Confirm Client ID", value=suggested_id)
+            
+            submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
+            
+            if submit: 
+                if not name.strip() or not phone.strip() or photo is None:
+                    st.error("❌ Name, Phone, and Photo are all required.")
+                else:
+                    try:
+                        final_id = manual_id.strip() if manual_id.strip() else suggested_id
+                        safe_filename = f"{final_id.replace('/', '-')}.jpg"
+                        file_bytes = photo.getvalue()
+                        
+                        sb_client.storage.from_("client-photos").upload(
+                            path=safe_filename,
+                            file=file_bytes,
+                            file_options={"content-type": "image/jpeg", "upsert": "true"}
+                        )
 
-                    # Save to DB
-                    with conn.session as s:
-                        s.execute(text("""
-                            INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                            VALUES (:i, :n, :p, :d, :u)
-                        """), {
-                            "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
-                        })
-                        s.commit()
-                    
-                    st.success(f"✅ Registered {name}")
-                    st.balloons()
-                    time.sleep(2)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"🚨 Registration Failed: {e}")
+                        base_url = st.secrets['supabase_url']
+                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
+
+                        with conn.session as s:
+                            s.execute(text("""
+                                INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                                VALUES (:i, :n, :p, :d, :u)
+                            """), {"i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url})
+                            s.commit()
+                        
+                        st.success(f"✅ Registered {name}")
+                        st.balloons()
+                        time.sleep(2)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"🚨 Registration Failed: {e}")
 
     # --- TAB 2: REPORTS ---
     with t2:

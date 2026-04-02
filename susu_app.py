@@ -96,6 +96,20 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+st.markdown(
+    """
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0E1117">
+    <style>
+        /* Force the background to stay dark even on load */
+        .stApp {
+            background-color: #0E1117 !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # This line enures 're' is seen as used without causing a syntax warning
 re_tool = re.compile(r'.*')
 

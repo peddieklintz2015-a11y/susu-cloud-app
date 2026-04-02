@@ -205,29 +205,83 @@ def fetch_data():
 # --- 1. THE SECURITY WALL ---
 def check_password():
     if "role" not in st.session_state:
-        # Hide sidebar on login screen
-        st.markdown("<style>[data-testid='stSidebar'] {display: none;}</style>", unsafe_allow_html=True)
+        # 1. Global CSS Fix for iPhone Safari and Windows
+        st.markdown(
+            """
+            <style>
+                /* Force Dark Background */
+                .stApp {
+                    background-color: #0E1117 !important;
+                }
+
+                /* Force All Text to be White (Fixes Ghosting) */
+                h1, h2, h3, p, label, span, .stMarkdown p {
+                    color: #FFFFFF !important;
+                    -webkit-text-fill-color: #FFFFFF !important;
+                }
+
+                /* THE IPHONE BUTTON FIX */
+                /* Targeting 'primary' buttons inside forms to kill the white-block effect */
+                div[data-testid="stForm"] button[kind="primary"],
+                button[data-testid="baseButton-primary"] {
+                    background-color: #FF484B !important; /* Your brand red */
+                    color: #FFFFFF !important;           /* White text */
+                    -webkit-text-fill-color: #FFFFFF !important;
+                    border: none !important;
+                    border-radius: 8px !important;
+                    -webkit-appearance: none !important; /* Forces Safari to drop system styling */
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                    height: 3rem !important;
+                    width: 100% !important;
+                    font-weight: 700 !important;
+                }
+
+                /* Ensure text inside the button is forced white */
+                button[data-testid="baseButton-primary"] p {
+                    color: #FFFFFF !important;
+                    -webkit-text-fill-color: #FFFFFF !important;
+                }
+
+                /* Fix for Input Fields visibility */
+                .stTextInput input {
+                    background-color: #1E293B !important;
+                    color: #FFFFFF !important;
+                    -webkit-text-fill-color: #FFFFFF !important;
+                    border: 1px solid #475569 !important;
+                }
+                
+                /* Hide sidebar on login */
+                [data-testid='stSidebar'] {display: none;}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
         
         st.title("🔐 RUCHANET SYSTEM LOGIN")
         col1, col2 = st.columns(2)
+        
         with col1:
             with st.form("agent_login"):
                 st.subheader("👤 Agent Login")
-                if st.form_submit_button("Access Collector Tools"):
+                # CHANGED: Added type="primary" and use_container_width
+                if st.form_submit_button("Access Collector Tools", type="primary", use_container_width=True):
                     st.session_state["role"] = "Agent"
                     st.rerun()
+                    
         with col2:
             with st.form("admin_login"):
                 st.subheader("🛡️ Manager Login")
                 pwd = st.text_input("Manager Password", type="password")
-                if st.form_submit_button("Verify Identity"):
+                # CHANGED: Added type="primary" and use_container_width
+                if st.form_submit_button("Verify Identity", type="primary", use_container_width=True):
                     if pwd == st.secrets["passwords"]["login_password"]: 
                         st.session_state["role"] = "Manager"
                         st.rerun()
                     else:
                         st.error("Invalid Manager Password")
         
-        st.stop() # This is the "Wall" that kills the script for unverified users
+        st.stop() 
     return True
 
 # Run the security check FIRST

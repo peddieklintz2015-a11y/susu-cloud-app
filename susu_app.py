@@ -773,7 +773,7 @@ with t1:
 
     # --- STEP 2: DATE (Moved outside form for reactivity) ---
     st.write("📅 **Step 2: Selection Date**")
-    # Choosing the date here immediately triggers the ID generation function below
+    # This triggers the ID generation function immediately when the date changes
     reg_date = st.date_input("Registration Date", value=datetime.now(), key="reg_date_selector")
     
     # This recalculates every time 'reg_date' changes
@@ -786,8 +786,7 @@ with t1:
         phone = st.text_input("Phone Number")
         daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
         
-        # This shows the suggested ID (e.g., 001/01/26), but you can 
-        # click in the box, delete it, and type "159/01/26" manually.
+        # Suggested ID displays automatically, but allows manual backdating
         manual_id = st.text_input("Confirm/Edit Client ID", value=suggested_id)
         
         submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
@@ -797,23 +796,24 @@ with t1:
                 st.error("❌ Name, Phone, and Photo are all required.")
             else:
                 try:
-                    # IMAGE COMPRESSION
+                    # --- IMAGE COMPRESSION ---
                     from PIL import Image
                     import io
+                    
                     img = Image.open(photo)
                     if img.mode in ("RGBA", "P"):
                         img = img.convert("RGB")
+                    
                     img.thumbnail((800, 800)) 
                     buffer = io.BytesIO()
                     img.save(buffer, format="JPEG", quality=70) 
                     compressed_bytes = buffer.getvalue()
 
-                    # ID FINALIZATION
-                    # Logic: If you typed something manually, use it. Otherwise, use the system suggestion.
+                    # --- ID FINALIZATION ---
                     final_id = manual_id.strip() if manual_id.strip() else suggested_id
                     safe_filename = f"{final_id.replace('/', '-')}.jpg"
                     
-                    # UPLOAD TO SUPABASE
+                    # --- UPLOAD TO SUPABASE STORAGE ---
                     sb_client.storage.from_("client-photos").upload(
                         path=safe_filename,
                         file=compressed_bytes,
@@ -823,22 +823,36 @@ with t1:
                     base_url = st.secrets['supabase_url']
                     p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
 
-                    # SAVE TO DATABASE
-                    with conn.session as s:
-                        s.execute(text("""
-                            INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                            VALUES (:i, :n, :p, :d, :u)
-                        """), {
-                            "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
-                        })
-                        s.commit()
-                    
-                    st.success(f"✅ Registered {name} as ID: {final_id}")
-                    st.balloons()
-                    time.sleep(1)
-                    st.rerun()
+                    # --- SAVE TO DATABASE WITH DUPLICATE CHECK ---
+                    try:
+                        with conn.session as s:
+                            s.execute(text("""
+                                INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                                VALUES (:i, :n, :p, :d, :u)
+                            """), {
+                                "i": final_id, 
+                                "n": name.strip(), 
+                                "p": phone.strip(), 
+                                "d": daily, 
+                                "u": p_url
+                            })
+                            s.commit()
+                        
+                        st.success(f"✅ Registered {name} as ID: {final_id}")
+                        st.balloons()
+                        time.sleep(1)
+                        st.rerun()
+
+                    except Exception as db_e:
+                        # Catching the UniqueViolation error specifically
+                        db_err_msg = str(db_e).lower()
+                        if "unique" in db_err_msg or "duplicate" in db_err_msg:
+                            st.warning(f"⚠️ Registration Stopped: A client named '{name}' or ID '{final_id}' already exists.")
+                        else:
+                            st.error(f"🚨 Database Error: {db_e}")
+
                 except Exception as e:
-                    st.error(f"🚨 Registration Failed: {e}")
+                    st.error(f"🚨 Image/System Error: {e}")
 
     # --- TAB 2: REPORTS ---
     with t2:

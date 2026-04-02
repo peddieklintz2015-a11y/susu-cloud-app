@@ -288,8 +288,46 @@ def check_password():
 
 # Run the security check FIRST
 check_password()
-
 # --- 2. THE SECURE APP (Everything below only runs AFTER login) ---
+st.markdown(
+        """
+        <style>
+            /* 1. Force the Header bar to be dark so the arrow isn't lost in white glare */
+            header[data-testid="stHeader"] {
+                background-color: #0E1117 !important;
+                color: white !important;
+                z-index: 999 !important; /* Ensures it stays on top */
+            }
+
+            /* 2. Target the Sidebar Toggle Button specifically */
+            [data-testid="stSidebarCollapseButton"] {
+                display: flex !important; 
+                visibility: visible !important;
+                color: white !important;
+                background-color: transparent !important;
+                left: 10px !important; /* Move it slightly so it's not tucked in the corner */
+                z-index: 1000 !important;
+            }
+
+            /* 3. Force the SVG Arrow Icon to be White */
+            /* On iPhone, Safari often renders this as black by default */
+            [data-testid="stSidebarCollapseButton"] svg {
+                fill: white !important;
+                stroke: white !important;
+                color: white !important;
+                width: 30px !important; /* Make it slightly larger for thumbs */
+                height: 30px !important;
+            }
+
+            /* 4. Ensure the Sidebar container itself is active */
+            [data-testid="stSidebar"] {
+                display: flex !important;
+                visibility: visible !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # Fetch data only after we are sure someone is logged in
 clients, contributions = fetch_data()

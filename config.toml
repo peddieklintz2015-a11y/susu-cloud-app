@@ -1,7 +1,7 @@
 [theme]
 primaryColor = "#FF484B"
 backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#161B22" # Darker navy/grey
+secondaryBackgroundColor = "#262730
 textColor = "#FFFFFF"
 base = "dark"
 

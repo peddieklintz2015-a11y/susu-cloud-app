@@ -99,42 +99,44 @@ st.markdown(
 st.markdown(
     """
     <style>
-        /* 1. Global Background */
+        /* 1. Global Dark Background */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Universal Text Fix */
-        h1, h2, h3, p, label, .stMarkdown p {
+        /* 2. Force White Text for iPhone visibility */
+        h1, h2, h3, p, label, span, .stMarkdown p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
         }
 
-        /* 3. THE IPHONE BUTTON RESET */
-        button[data-testid="baseButton-secondary"], 
-        button[data-testid="baseButton-primary"],
-        .stButton button {
-            background-color: #262730 !important; /* Solid Dark Grey */
-            color: #FFFFFF !important;           /* Solid White Text */
-            border: 2px solid #FFFFFF !important; /* Thick white border for visibility */
-            border-radius: 10px !important;
-            -webkit-appearance: none !important;  /* Stops iOS from making it a white block */
+        /* 3. THE FORM BUTTON FIX */
+        /* Targets buttons inside st.form specifically for Webkit/Safari */
+        div[data-testid="stForm"] button[kind="primary"],
+        button[data-testid="baseButton-primary"] {
+            background-color: #FF484B !important; /* Your brand red */
+            color: #FFFFFF !important;           /* White text */
+            -webkit-text-fill-color: #FFFFFF !important;
+            border: none !important;
+            border-radius: 8px !important;
+            -webkit-appearance: none !important;  /* Stops Safari 'White Block' effect */
+            box-shadow: none !important;
             opacity: 1 !important;
-            display: inline-flex !important;
+            visibility: visible !important;
         }
 
-        /* 4. Force the text inside to be visible no matter what */
-        button[data-testid="baseButton-secondary"] p,
-        .stButton button p {
+        /* 4. Ensure button text is bold and white */
+        button[data-testid="baseButton-primary"] p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
             font-weight: 700 !important;
         }
 
-        /* 5. Input Field Fixes */
+        /* 5. Fix the input field background */
         .stTextInput input {
             background-color: #1E293B !important;
             color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
             border: 1px solid #475569 !important;
         }
     </style>

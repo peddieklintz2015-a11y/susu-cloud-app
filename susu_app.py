@@ -292,37 +292,49 @@ check_password()
 st.markdown(
         """
         <style>
-            /* 1. Force the Header bar to be dark so the arrow isn't lost in white glare */
+            /* 1. Header and Sidebar Fixes */
             header[data-testid="stHeader"] {
                 background-color: #0E1117 !important;
                 color: white !important;
-                z-index: 999 !important; /* Ensures it stays on top */
             }
-
-            /* 2. Target the Sidebar Toggle Button specifically */
-            [data-testid="stSidebarCollapseButton"] {
+            [data-testid="stSidebar"] { display: flex !important; }
+            [data-testid="stSidebarCollapseButton"] { 
                 display: flex !important; 
-                visibility: visible !important;
                 color: white !important;
-                background-color: transparent !important;
-                left: 10px !important; /* Move it slightly so it's not tucked in the corner */
-                z-index: 1000 !important;
+            }
+            [data-testid="stSidebarCollapseButton"] svg { fill: white !important; }
+
+            /* 2. UNIVERSAL BUTTON FIX (For Register & Search) */
+            /* This forces all 'Primary' buttons to stay Red on iPhone */
+            button[kind="primary"],
+            button[data-testid="baseButton-primary"],
+            .stButton button[kind="primary"] {
+                background-color: #FF484B !important;
+                color: white !important;
+                -webkit-text-fill-color: white !important;
+                -webkit-appearance: none !important; /* Kills the white block effect */
+                border: none !important;
+                border-radius: 8px !important;
+                font-weight: 700 !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                width: 100% !important;
             }
 
-            /* 3. Force the SVG Arrow Icon to be White */
-            /* On iPhone, Safari often renders this as black by default */
-            [data-testid="stSidebarCollapseButton"] svg {
-                fill: white !important;
-                stroke: white !important;
+            /* 3. Button Text Visibility */
+            button[data-testid="baseButton-primary"] p {
                 color: white !important;
-                width: 30px !important; /* Make it slightly larger for thumbs */
-                height: 30px !important;
+                -webkit-text-fill-color: white !important;
             }
 
-            /* 4. Ensure the Sidebar container itself is active */
-            [data-testid="stSidebar"] {
-                display: flex !important;
-                visibility: visible !important;
+            /* 4. Secondary Buttons (Optional: Make them dark grey instead of white) */
+            button[kind="secondary"],
+            button[data-testid="baseButton-secondary"] {
+                background-color: #262730 !important;
+                color: white !important;
+                -webkit-text-fill-color: white !important;
+                border: 1px solid #475569 !important;
+                -webkit-appearance: none !important;
             }
         </style>
         """,
@@ -811,68 +823,73 @@ elif choice == "🛠 Admin Tools":
     
     t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
-    # --- TAB 1: REGISTRATION ---
-    with t1:
-        st.subheader("👤 Register New Client")
-        
-        # --- NEW: SCREEN LIGHT TOGGLE ---
-        use_screen_light = st.toggle("💡 Toggle Screen Light (for dark areas)")
-        if use_screen_light:
-            st.markdown(
-                "<style>.stApp { background-color: white !important; color: black !important; }</style>",
-                unsafe_allow_html=True
-            )
-            st.info("🔦 Screen Light Active: Use this to illuminate faces in the dark.")
-
-        # Camera is outside the form for better performance
-        photo = st.camera_input("Take Client Photo (Required)")
+# --- TAB 1: REGISTRATION (Camera + Library Upload) ---
+with t1:
+    st.subheader("👤 Register New Client")
     
-        with st.form("reg_form", clear_on_submit=True):
-            name = st.text_input("Full Name")
-            phone = st.text_input("Phone Number")
-            daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
-            reg_date = st.date_input("Registration Date", value=datetime.now())
-            
-            # Use current logic for ID generation
-            suggested_id = get_next_gen_id(reg_date)
-            manual_id = st.text_input("Confirm Client ID", value=suggested_id, help="Format: Number/MM/YY")
-            
-            submit = st.form_submit_button("Register to Cloud")
-            
-            if submit: 
-                if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ Name, Phone, and Photo are all required.")
-                else:
-                    try:
-                        final_id = manual_id.strip() if manual_id.strip() else suggested_id
-                        # Clean filename for Supabase
-                        safe_filename = f"{final_id.replace('/', '-')}.jpg"
-                        
-                        # Upload to 'client-photos' bucket
-                        sb_client.storage.from_("client-photos").upload(
-                            path=safe_filename,
-                            file=photo.getvalue(),
-                            file_options={"content-type": "image/jpeg", "upsert": "true"}
-                        )
+    # 1. Provide two ways to get the photo
+    st.write("📸 **Step 1: Get Client Photo**")
+    
+    # Create two columns for the choices
+    choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True)
+    
+    photo = None
+    if choice == "Live Camera":
+        photo = st.camera_input("Take Photo")
+    else:
+        photo = st.file_uploader("Select Image from iPhone Gallery", type=["jpg", "jpeg", "png"])
 
-                        base_url = st.secrets['supabase_url']
-                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
+    # 2. The Registration Form
+    with st.form("reg_form", clear_on_submit=True):
+        st.write("📝 **Step 2: Client Details**")
+        name = st.text_input("Full Name")
+        phone = st.text_input("Phone Number")
+        daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
+        reg_date = st.date_input("Registration Date", value=datetime.now())
+        
+        suggested_id = get_next_gen_id(reg_date)
+        manual_id = st.text_input("Confirm Client ID", value=suggested_id)
+        
+        # We keep type="primary" to prevent the 'White Block' bug on iPhone
+        submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
+        
+        if submit: 
+            if not name.strip() or not phone.strip() or photo is None:
+                st.error("❌ Name, Phone, and Photo are all required.")
+            else:
+                try:
+                    final_id = manual_id.strip() if manual_id.strip() else suggested_id
+                    safe_filename = f"{final_id.replace('/', '-')}.jpg"
+                    
+                    # Process the file (works for both camera and uploader)
+                    file_bytes = photo.getvalue()
+                    
+                    # Upload to Supabase 'client-photos' bucket
+                    sb_client.storage.from_("client-photos").upload(
+                        path=safe_filename,
+                        file=file_bytes,
+                        file_options={"content-type": "image/jpeg", "upsert": "true"}
+                    )
 
-                        with conn.session as s:
-                            s.execute(text("""
-                                INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                VALUES (:i, :n, :p, :d, :u)
-                            """), {
-                                "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
-                            })
-                            s.commit()
-                        
-                        st.success(f"✅ Registered {name} with ID: {final_id}")
-                        st.balloons()
-                        time.sleep(2)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"🚨 Registration Failed: {e}")
+                    base_url = st.secrets['supabase_url']
+                    p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
+
+                    # Save to DB
+                    with conn.session as s:
+                        s.execute(text("""
+                            INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
+                            VALUES (:i, :n, :p, :d, :u)
+                        """), {
+                            "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
+                        })
+                        s.commit()
+                    
+                    st.success(f"✅ Registered {name}")
+                    st.balloons()
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"🚨 Registration Failed: {e}")
 
     # --- TAB 2: REPORTS ---
     with t2:

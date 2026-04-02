@@ -7,3 +7,4 @@ supabase
 xlsxwriter
 requests
 pytz
+Pillow

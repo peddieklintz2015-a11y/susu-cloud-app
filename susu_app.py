@@ -99,53 +99,51 @@ st.markdown(
 st.markdown(
     """
     <style>
-        /* 1. Global Background */
+        /* 1. Global Reset for iPhone */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Force iPhone Text Visibility */
+        /* 2. Force White Text everywhere on Mobile */
         h1, h2, h3, p, label, span, .stMarkdown p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
         }
 
-        /* 3. THE BUTTON FIX (Preventing the white-out) */
+        /* 3. THE "NUCLEAR" BUTTON FIX */
+        /* 'all: unset' strips away the iPhone's default white-button styling */
         button[data-testid="baseButton-secondary"], 
         button[data-testid="baseButton-primary"],
-        .stButton button {
-            /* Force background to be Dark Slate instead of White */
-            background-color: #262730 !important; 
-            
-            /* Force text to be White */
-            color: #FFFFFF !important;
+        .stButton > button {
+            all: unset !important; 
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            background-color: #262730 !important; /* Force the Dark Grey back */
+            color: #FFFFFF !important;              /* Force White Text */
             -webkit-text-fill-color: #FFFFFF !important;
-            
-            /* Remove the default iOS button styling */
-            -webkit-appearance: none !important;
             border: 1px solid #475569 !important;
-            opacity: 1 !important;
+            border-radius: 8px !important;
+            padding: 10px 20px !important;
+            min-height: 40px !important;
+            width: auto !important;
+            cursor: pointer !important;
+            font-family: 'Inter', sans-serif !important;
             visibility: visible !important;
         }
 
-        /* 4. Ensuring the inner text of the button is visible */
-        button[data-testid="baseButton-secondary"] p,
-        button[data-testid="baseButton-primary"] p,
-        .stButton button p {
+        /* 4. Ensuring the inner text is visible */
+        .stButton button p, .stButton button span {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
+            margin: 0 !important;
         }
 
-        /* 5. Fix for Input Boxes (The password field) */
+        /* 5. Fix for Input Fields */
         .stTextInput input {
             background-color: #1E293B !important;
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
-        }
-
-        /* 6. Active/Tap State: Make it change to your brand red when clicked */
-        button:active {
-            background-color: #FF484B !important;
         }
     </style>
     """,

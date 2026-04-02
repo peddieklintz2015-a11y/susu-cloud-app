@@ -99,51 +99,43 @@ st.markdown(
 st.markdown(
     """
     <style>
-        /* 1. Global Reset for iPhone */
+        /* 1. Global Background */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Force White Text everywhere on Mobile */
-        h1, h2, h3, p, label, span, .stMarkdown p {
+        /* 2. Universal Text Fix */
+        h1, h2, h3, p, label, .stMarkdown p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
         }
 
-        /* 3. THE "NUCLEAR" BUTTON FIX */
-        /* 'all: unset' strips away the iPhone's default white-button styling */
+        /* 3. THE IPHONE BUTTON RESET */
         button[data-testid="baseButton-secondary"], 
         button[data-testid="baseButton-primary"],
-        .stButton > button {
-            all: unset !important; 
+        .stButton button {
+            background-color: #262730 !important; /* Solid Dark Grey */
+            color: #FFFFFF !important;           /* Solid White Text */
+            border: 2px solid #FFFFFF !important; /* Thick white border for visibility */
+            border-radius: 10px !important;
+            -webkit-appearance: none !important;  /* Stops iOS from making it a white block */
+            opacity: 1 !important;
             display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            background-color: #262730 !important; /* Force the Dark Grey back */
-            color: #FFFFFF !important;              /* Force White Text */
-            -webkit-text-fill-color: #FFFFFF !important;
-            border: 1px solid #475569 !important;
-            border-radius: 8px !important;
-            padding: 10px 20px !important;
-            min-height: 40px !important;
-            width: auto !important;
-            cursor: pointer !important;
-            font-family: 'Inter', sans-serif !important;
-            visibility: visible !important;
         }
 
-        /* 4. Ensuring the inner text is visible */
-        .stButton button p, .stButton button span {
+        /* 4. Force the text inside to be visible no matter what */
+        button[data-testid="baseButton-secondary"] p,
+        .stButton button p {
             color: #FFFFFF !important;
             -webkit-text-fill-color: #FFFFFF !important;
-            margin: 0 !important;
+            font-weight: 700 !important;
         }
 
-        /* 5. Fix for Input Fields */
+        /* 5. Input Field Fixes */
         .stTextInput input {
             background-color: #1E293B !important;
             color: #FFFFFF !important;
-            -webkit-text-fill-color: #FFFFFF !important;
+            border: 1px solid #475569 !important;
         }
     </style>
     """,

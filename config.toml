@@ -1,22 +1,8 @@
 [theme]
-# The 'Brand' color for the primary buttons and highlights
 primaryColor = "#FF484B"
-
-# The main background (Deep Black)
 backgroundColor = "#0E1117"
-
-# THIS IS THE KEY: We set this to a dark slate grey 
-# so Safari doesn't default to a white background for buttons.
-secondaryBackgroundColor = "#262730"
-
-# Forces all base text to be white
+secondaryBackgroundColor = "#161B22" # Darker navy/grey
 textColor = "#FFFFFF"
-
-# Professional font fallback
-font = "sans serif"
-
-# TELLS STREAMLIT: Use 'Dark Mode' logic for all internal components
-# This is vital for mobile browser compatibility
 base = "dark"
 
 [server]

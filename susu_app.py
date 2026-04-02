@@ -98,48 +98,52 @@ st.markdown(
 
 st.markdown(
     """
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#0E1117">
     <style>
-        /* 1. Global Background */
+        /* 1. Import a Professional Google Font (Inter) */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        /* 2. Apply Font to the entire App */
+        html, body, [class*="css"], .stApp {
+            font-family: 'Inter', sans-serif !important;
+        }
+
+        /* 3. Global Background & Text Visibility */
         .stApp {
             background-color: #0E1117 !important;
         }
 
-        /* 2. Force All Text Visibility */
-        h1, h2, h3, h4, p, label, span, .stMarkdown p {
+        h1, h2, h3, h4, p, label, .stMarkdown p {
             color: #FFFFFF !important;
-            opacity: 1 !important;
+            font-family: 'Inter', sans-serif !important;
+            letter-spacing: -0.01em; /* Makes professional fonts look tighter */
         }
 
-        /* 3. THE BUTTON FIX: Target the internal 'baseButton' class */
-        /* This forces the button to be visible even without a mouse over it */
-        button[kind="secondary"], button[kind="primary"], .stButton button {
-            background-color: #1E293B !important; /* Visible dark grey */
-            color: #FFFFFF !important;           /* Visible white text */
-            border: 1px solid #475569 !important; /* Border to define the shape */
-            opacity: 1 !important;               /* Prevent transparency */
-            visibility: visible !important;
-            display: inline-flex !important;
+        /* 4. Button Visibility Fix (The 'Ghost' Button Fix) */
+        button[data-testid="baseButton-secondary"], 
+        button[data-testid="baseButton-primary"],
+        .stButton > button {
+            background-color: #1E293B !important; 
+            color: white !important;
+            border: 1px solid #475569 !important;
+            font-weight: 500 !important; /* Professional weight */
+            font-family: 'Inter', sans-serif !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease-in-out !important;
         }
 
-        /* 4. Ensure button text inside the button is white */
-        .stButton button p, .stButton button span {
-            color: #FFFFFF !important;
-        }
-
-        /* 5. Hover state for a better look */
-        button[kind="secondary"]:hover, .stButton button:hover {
-            background-color: #334155 !important;
-            border-color: #FACC15 !important;
-            color: #FACC15 !important;
-        }
-
-        /* 6. Input Field Fixes */
-        .stTextInput input {
+        /* 5. Professional Hover Effect */
+        button[data-testid="baseButton-secondary"]:hover,
+        button[data-testid="baseButton-primary"]:hover {
+            border-color: #FF484B !important;
             background-color: #1E293B !important;
-            color: #FFFFFF !important;
-            border: 1px solid #334155 !important;
+            box-shadow: 0 0 10px rgba(255, 72, 75, 0.2) !important;
+        }
+        
+        /* 6. Fix input field text font */
+        .stTextInput input {
+            font-family: 'Inter', sans-serif !important;
+            background-color: #1E293B !important;
+            color: white !important;
         }
     </style>
     """,

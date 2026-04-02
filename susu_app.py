@@ -101,9 +101,24 @@ st.markdown(
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0E1117">
     <style>
-        /* Force the background to stay dark even on load */
+        /* 1. Force the background to stay dark */
         .stApp {
             background-color: #0E1117 !important;
+        }
+
+        /* 2. Fix the Text! This forces ALL text in the app to be White/Off-White */
+        .stApp, .stMarkdown, p, label, .stWidgetLabel {
+            color: #FAFAFA !important;
+        }
+
+        /* 3. Ensure Headers (like "Record Transactions") are bright white */
+        h1, h2, h3, h4 {
+            color: #FFFFFF !important;
+        }
+
+        /* 4. Optional: Make small captions slightly dimmer so they don't glow too much */
+        .stCaption {
+            color: #A1A1AA !important;
         }
     </style>
     """,

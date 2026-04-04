@@ -661,7 +661,7 @@ elif choice == "💸 Transactions":
                 st.success("✅ Transaction Synced!")
                 generate_susu_receipt(idx="new", date_val=final_timestamp, client_name=target, amount=db_amt, marks=db_marks, bal_after=total_saved_ghs+db_amt)
                 st.cache_data.clear()
-                time.sleep(10)
+                time.sleep(5)
                 st.rerun()
 
     else:

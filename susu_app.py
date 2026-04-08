@@ -156,7 +156,7 @@ def sync_to_cloud(new_record):
     try:
         # Save to your Supabase 'contributions' table
         sb_client.table("contributions").insert(new_record).execute()
-        st.success("✅ Transaction synced to RUCHANET Cloud!")
+        st.success(f"☁️ Transaction synced to {st.session_state.get('biz_name', 'your')} Cloud!")
         return True
     except Exception as e:
         st.error(f"❌ Cloud Sync Error: {e}")
@@ -253,7 +253,7 @@ set_custom_style()
 # This stops the app immediately if the secret is set to true
 if st.secrets["app_settings"]["maintenance_mode"]:
     st.title("🚧 System Maintenance")
-    st.warning("RUCHANET DAILY SUSU is currently undergoing scheduled updates.")
+    st.warning("MY SUSU APP is currently undergoing scheduled updates.")
     st.info("We'll be back online shortly! 🙏")
     st.stop()
 
@@ -388,15 +388,22 @@ with st.spinner("Syncing Cloud Data..."):
         st.error(f"Sync Error: {e}")
 
 with st.sidebar:
-    st.title("📱 RUCHANET APP")
-    st.success(f"Logged in as: {st.session_state['role']}")
-    
-    # LOGOUT BUTTON
-    if st.button("🚪 Logout / Sign Out", use_container_width=True):
-        del st.session_state["role"]
-        st.cache_data.clear()
-        st.rerun()
-    
+    # 1. CHECK IF LOGGED IN (Paste your new code here)
+    if "tenant_id" not in st.session_state:
+        # This shows if logged out
+        st.sidebar.info("👋 Welcome! Please log in to manage your Susu business.")
+    else:
+        # This shows only when logged in
+        # We use .get() to be safe and avoid the red errors
+        biz = st.session_state.get('biz_name', 'Business')
+        role = st.session_state.get('role', 'User')
+        
+        st.sidebar.title(f"🏢 {biz}")
+        st.sidebar.success(f"👤 Logged in as: {role}")
+        
+        if st.sidebar.button("🔴 Sign Out / Logout", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
     st.divider()
     # DYNAMIC MENU
     if st.session_state["role"] == "Manager":
@@ -451,7 +458,7 @@ def generate_susu_receipt(idx, date_val, client_name, amount, marks, bal_after=N
             {bal_html}
         </table>
         <hr style="border-top: 1px dashed #000;">
-        <center><p style="font-size:12px;"><span style="font-style: italic;">Thank you for saving with RUCHANET SUSU!</span><br>Verified Digital Record</p></center>
+        <center><p style="font-size:12px;"><span style="font-style: italic;">f"Thank you for saving with {st.session_state.get('biz_name', 'our service')}"</span><br>Verified Digital Record</p></center>
     </div>
     <button onclick="printDiv('receipt-{idx}')" style="width:100%; padding:10px; margin-top:8px; background:#FFD700; border:none; font-weight:bold; cursor:pointer;">🖨️ Print Receipt</button>
     <script>
@@ -752,7 +759,7 @@ elif choice == "💸 Transactions":
                 'tenant_id': st.session_state.get("tenant_id")
             }
             
-            with st.spinner("Authorizing with RUCHANET Cloud..."):
+            with st.spinner(f"Authorizing with {st.session_state.get('biz_name', 'Cloud')}..."):
                 response = cloud_db_insert("contributions", new_entry)
             
             if response['success']:

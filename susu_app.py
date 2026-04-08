@@ -30,63 +30,68 @@ st.set_page_config(
 conn = st.connection("postgresql", type="sql")
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 
-def auth_gate():
-        if "tenant_id" not in st.session_state:
-           st.title("🚀 Welcome to MY SUSU APP: Cloud Portal")
-        st.markdown("""
-        *The ultimate cloud solution for your Susu business.*
-        * ✅ Secure Cloud Storage**
-        * ✅ Real-time Client Passbooks**
-        * ✅ Automated Sunday Reports**
-        * ✅ **Only GHS 99.90 / Month**
-        """)
-        st.divider()
-        tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register (14-Day Trial)"])
+# --- INITIALIZE SUPABASE FIRST ---
+try:
+    # This MUST be outside of any function to be seen by the whole app
+    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+except Exception as e:
+    st.error(f"Supabase Connection Error: {e}")
+    st.stop()
 
-        with tab1:
-            with st.form("login"):
-                email = st.text_input("Business Email")
-                pwd = st.text_input("Password", type="password")
+# --- 🔓 THE UNIFIED TENANT GATE ---
+# This checks if the user is logged in. If not, it shows the Landing Page.
+if "tenant_id" not in st.session_state:
+    st.title("🚀 Welcome to MY SUSU APP")
+    st.markdown("""
+    ### The Ultimate Cloud Solution for your Susu Business
+    * ✅ **Secure Cloud Storage** & Real-time Client Passbooks
+    * ✅ **Automated Sunday Reports** for Managers
+    * ✅ **GHS 99.90 / Month** (14-Day Free Trial)
+    """)
+    st.divider()
+    
+    tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register Business"])
+    
+    with tab1:
+        with st.form("login_form"):
+            email = st.text_input("Business Email")
+            pwd = st.text_input("Password", type="password")
+            if st.form_submit_button("Login to Dashboard", type="primary", use_container_width=True):
+                # Fetch user from Supabase
+                res = sb_client.table("tenants").select("*").eq("admin_email", email).execute()
                 
-                if st.form_submit_button("Login to Dashboard", type="primary"):
-                    # 1. Fetch the user from Supabase
-                    res = sb_client.table("tenants").select("*").eq("admin_email", email).execute()
-                    
-                    # 2. Check if user exists and password is correct
-                    if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
-                        user = res.data[0]
-                        
-                        # 3. Save session data
-                        st.session_state["tenant_id"] = user['id']
-                        st.session_state["biz_name"] = user['business_name']
-                        
-                        # 4. Handle the Developer vs Tenant role
-                        # This looks for the 'account_role' column you added to your table
-                        st.session_state["account_role"] = user.get('account_role', 'tenant')
-                        
-                        st.success(f"Welcome back, {user['business_name']}!")
-                        st.rerun()
-                    else:
-                        st.error("Invalid credentials. Please check your email/password.")
+                if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
+                    user = res.data[0]
+                    # This LOCKS the app to this specific business
+                    st.session_state.update({
+                        "tenant_id": user['id'],
+                        "biz_name": user['business_name'],
+                        "account_role": user.get('account_role', 'tenant'),
+                        "role": "Manager" # Sets access level for sidebar
+                    })
+                    st.success(f"Welcome back, {user['business_name']}!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials. Please check your email/password.")
 
-        with tab2:
-            with st.form("signup"):
-                new_biz = st.text_input("Organization/Susu Name")
-                new_email = st.text_input("Admin Email")
-                new_pwd = st.text_input("Create Password", type="password")
-                if st.form_submit_button("Start My 14-Day Trial"):
-                    hashed = hash_password(new_pwd)
-                    # Create the new Tenant with trial settings
-                    sb_client.table("tenants").insert({
-                        "business_name": new_biz,
-                        "admin_email": new_email,
-                        "password_hash": hashed,
-                        "price_ghs": 99.9,
-                        "is_subscribed": False,
-                        "account_role": "tenant"
-                    }).execute()
-                    st.success("Account created! Please switch to the Login tab.")
-        st.stop()
+    with tab2:
+        with st.form("signup_form"):
+            new_biz = st.text_input("Organization Name")
+            new_email = st.text_input("Admin Email")
+            new_pwd = st.text_input("Create Password", type="password")
+            if st.form_submit_button("Start 14-Day Trial", use_container_width=True):
+                hashed = hash_password(new_pwd)
+                sb_client.table("tenants").insert({
+                    "business_name": new_biz,
+                    "admin_email": new_email,
+                    "password_hash": hashed,
+                    "price_ghs": 99.9,
+                    "is_subscribed": False
+                }).execute()
+                st.success("Account created! Please switch to the Login tab.")
+    
+    st.stop() # 🛑 Stops the rest of the app until login is successful
 
 try:
     sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
@@ -290,37 +295,6 @@ def cloud_db_insert(table, record):
         return {"success": False, "error": "No data returned"}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-# --- 1. THE SECURITY WALL ---
-def check_password():
-    if "role" not in st.session_state:
-        st.title("🔐 RUCHANET SYSTEM LOGIN")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            with st.form("agent_login"):
-                st.subheader("👤 Agent Login")
-                # CHANGED: Added type="primary" and use_container_width
-                if st.form_submit_button("Access Collector Tools", type="primary", use_container_width=True):
-                    st.session_state["role"] = "Agent"
-                    st.rerun()
-                    
-        with col2:
-            with st.form("admin_login"):
-                st.subheader("🛡️ Manager Login")
-                pwd = st.text_input("Manager Password", type="password")
-                # CHANGED: Added type="primary" and use_container_width
-                if st.form_submit_button("Verify Identity", type="primary", use_container_width=True):
-                    if pwd == st.secrets["passwords"]["login_password"]: 
-                        st.session_state["role"] = "Manager"
-                        st.rerun()
-                    else:
-                        st.error("Invalid Manager Password")
-        
-        st.stop() 
-    return True
-# Run the security check FIRST
-check_password()
 
 # --- 2. THE SECURE APP (Everything below only runs AFTER login) ---
 st.markdown(

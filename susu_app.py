@@ -928,13 +928,29 @@ elif choice == "🛠 Admin Tools":
                         st.error(f"Error: {e}")
 
     # --- TAB 2: REPORTS (Multi-User) ---
-    with t2:
-        st.subheader("📊 Executive Intelligence")
-        user_email = st.session_state.get("admin_email")
+with t2:
+    st.subheader("📊 Executive Intelligence")
+    
+    # 1. Grab the email from session state
+    user_email = st.session_state.get("admin_email")
+    
+    if not user_email:
+        st.warning("⚠️ No email found for this account. Please update your profile.")
+    else:
+        st.info(f"📧 Reports will be sent to: **{user_email}**")
+        
         if st.button("🚀 Force Send Comprehensive Weekly Report"):
-            with st.spinner("Sending..."):
-                if send_weekly_report(contributions_df, manual=True, target_email=user_email):
-                    st.success(f"✅ Report Sent to {user_email}!")
+            # 2. Check if there is actually data to report
+            if contributions_df.empty:
+                st.error("❌ No transaction data available to generate a report.")
+            else:
+                with st.spinner(f"Generating report for {user_email}..."):
+                    # 3. Pass the email to the function
+                    success = send_weekly_report(contributions_df, manual=True, target_email=user_email)
+                    if success:
+                        st.success(f"✅ Report Sent to {user_email}!")
+                    else:
+                        st.error("❌ Failed to send email. Check your SMTP settings.")
 
     # --- TAB 3: DATA CLEANUP & AUDIT (RETAINED) ---
     with t3:

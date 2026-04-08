@@ -8,8 +8,15 @@ import math
 from datetime import datetime
 from sqlalchemy import text
 from supabase import create_client
-
 import hashlib
+
+# --- INITIALIZE SUPABASE FIRST ---
+try:
+    # This MUST be outside of any function to be seen by the whole app
+    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+except Exception as e:
+    st.error(f"Supabase Connection Error: {e}")
+    st.stop()
 
 def hash_password(password):
     """Encodes password for security."""
@@ -30,14 +37,6 @@ st.set_page_config(
 conn = st.connection("postgresql", type="sql")
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 
-# --- INITIALIZE SUPABASE FIRST ---
-try:
-    # This MUST be outside of any function to be seen by the whole app
-    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-except Exception as e:
-    st.error(f"Supabase Connection Error: {e}")
-    st.stop()
-
 # --- 🔓 THE UNIFIED TENANT GATE ---
 # This checks if the user is logged in. If not, it shows the Landing Page.
 if "tenant_id" not in st.session_state:
@@ -49,16 +48,20 @@ if "tenant_id" not in st.session_state:
     * ✅ **GHS 99.90 / Month** (14-Day Free Trial)
     """)
     st.markdown("## 🛠️ Powerful Features for Susu Managers")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.info("### ☁️ Cloud Sync\nAccess your data from any phone, anywhere.")
     with col2:
         st.success("### 📊 Auto-Reports\nWeekly Sunday reports sent via WhatsApp/Email.")
     with col3:
-        st.warning("### 🔐 Secure\nBank-grade encryption for all client balances.")
+        st.markdown("### 🏦 Bank-Grade Security\nAll data is encrypted before it hits the cloud.")
+    with col4:
+        st.markdown("### 📱 Mobile Ready\nInstall this app on your Android or iPhone for easy access.")
     st.divider()
-    
+    # This adds the Video Tour you wanted
+    st.markdown("### 📽️ See MY SUSU APP in Action")
+    st.video("https://www.youtube.com/watch?v=your_video_id") # Use your tutorial link here!
     tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register Business"])
     
     with tab1:

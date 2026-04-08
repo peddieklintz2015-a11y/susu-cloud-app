@@ -21,8 +21,8 @@ def check_password_auth(typed_password, stored_hash):
 
 # --- 1. SETUP ---
 st.set_page_config(
-    page_title="RUCHANET DAILY SUSU",
-    page_icon="logo.png", # Points to your file in the GitHub folder
+    page_title="MY SUSU APP", 
+    page_icon="💰", 
     layout="wide"
 )
 
@@ -68,7 +68,7 @@ except Exception as e:
     st.error(f"Cloud Bridge Syncing... {e}")
 
 # --- END OF INSERTION ---
-# Your existing code (Dashboard, Transactions, etc.) starts below this line...
+# Your existing code (Dashboard, Transactions, etc.) starts below this line....
 
 def sync_to_cloud(new_record):
     """Strictly saves to Supabase Cloud."""
@@ -85,14 +85,13 @@ def sync_to_cloud(new_record):
         return False
 
 def auth_gate():
-    if "tenant_id" not in st.session_state:
-        # --- LANDING PAGE UI ---
-        st.title("🚀 RUCHANET Cloud: Susu Management SaaS")
+        if "tenant_id" not in st.session_state:
+           st.title("🚀 Welcome to MY SUSU APP: Cloud Portal")
         st.markdown("""
-        **Transform your Susu business with the power of the Cloud.**
-        * ✅ **14-Day Free Trial** (No card required)
-        * ✅ **Multi-Agent Support** for your staff
-        * ✅ **Automated Sunday Reports**
+        *The ultimate cloud solution for your Susu business.*
+        * ✅ Secure Cloud Storage**
+        * ✅ Real-time Client Passbooks**
+        * ✅ Automated Sunday Reports**
         * ✅ **Only GHS 99.90 / Month**
         """)
         st.divider()
@@ -446,7 +445,7 @@ def generate_susu_receipt(idx, date_val, client_name, amount, marks, bal_after=N
     receipt_html = f"""
     <div id="receipt-{idx}" style="font-family: 'Courier New', monospace; width: 280px; padding: 15px; background: white; color: black; border: 1px solid #ddd; line-height: 1.2;">
         <center>
-            <h3 style="margin:0;">RUCHANET SUSU</h3>
+            <h3 style="margin:0;">MY SUSU APP</h3>
             <p style="font-size:10px; margin:2px;">Rural Christian Network Savings</p>
             <p style="font-size:11px; margin:0;">* TRANSACTION RECEIPT *</p>
         </center>
@@ -622,7 +621,17 @@ if choice == "📊 Dashboard":
     
     st.title(f"📊 {st.session_state.get('biz_name', 'Business')} Overview")
     
-    m1, m2, m3, m4 = st.columns(4)
+    # 1. LAYOUT DEFINITION (Fixes the col_refresh error)
+    m1, m2, m3, m4, col_refresh = st.columns([1, 1, 1, 1, 0.3])
+
+    # 2. REFRESH BUTTON LOGIC
+    with col_refresh:
+        # Added a unique key to prevent 'Duplicate Widget ID' errors
+        if st.button("🔄", key="dash_refresh_btn", help="Refresh Dashboard Data"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # 3. METRICS SECTION
     m1.metric("👥 Total Clients", len(clients_df))
 
     if not contributions_df.empty:
@@ -631,19 +640,20 @@ if choice == "📊 Dashboard":
         
         # Date processing for deltas
         contributions_df['date_dt'] = pd.to_datetime(contributions_df['date'])
-        today_total = contributions_df[contributions_df['date_dt'].dt.date == datetime.now().date()]['amount'].sum()
+        today_date = datetime.now().date()
+        today_total = contributions_df[contributions_df['date_dt'].dt.date == today_date]['amount'].sum()
 
         m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}", delta=f"GHS {today_total:,.2f} Today")
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
         m4.metric("📉 Net Liability", f"GHS {(total_vault - total_commissions):,.2f}")
 
-        # Monthly Chart
+        # 4. MONTHLY CHART
         st.divider()
         contributions_df['Month'] = contributions_df['date_dt'].dt.strftime('%b %Y')
         monthly_profit = contributions_df.groupby('Month')['fee'].sum().reset_index()
         st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FF484B")
         
-        # 31-Mark Maturity Alerts
+        # 5. 31-MARK MATURITY ALERTS
         st.subheader("🎯 Payout Readiness (31+ Marks)")
         marks_summary = contributions_df.groupby('client_name')['marks_covered'].sum().reset_index()
         ready = marks_summary[marks_summary['marks_covered'] >= 31]
@@ -651,10 +661,16 @@ if choice == "📊 Dashboard":
             for _, row in ready.iterrows():
                 st.success(f"🌟 {row['client_name']} has {row['marks_covered']} marks.")
         
-        # CSV Export
+        # 6. CSV EXPORT
         with st.expander("📥 Download Business Records"):
             csv = contributions_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", data=csv, file_name=f"{st.session_state.get('biz_name')}_records.csv", mime="text/csv")
+            st.download_button(
+                label="Download CSV", 
+                data=csv, 
+                file_name=f"{st.session_state.get('biz_name', 'Business')}_records.csv", 
+                mime="text/csv",
+                key="dash_csv_download"
+            )
     else:
         st.info("No transaction data available yet.")
 
@@ -662,35 +678,35 @@ elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
     if not clients_df.empty:
-        col_search, col_mode, col_date = st.columns([2, 1, 1])
+        # FIX: Added 'col_refresh' to the columns definition here
+        col_search, col_mode, col_date, col_refresh = st.columns([2, 1, 1, 1])
+        
         with col_search:
             target = st.selectbox("Select Client", clients_df['client_name'].tolist())
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
         with col_date:
-            final_timestamp = st.date_input("Date", value=datetime.now()) if is_migration else datetime.now()
+            # Handle date vs datetime for migration mode
+            if is_migration:
+                sel_date = st.date_input("Transaction Date", value=datetime.now().date())
+                final_timestamp = datetime.combine(sel_date, datetime.now().time())
+            else:
+                final_timestamp = datetime.now()
+                st.info(f"Date: {final_timestamp.strftime('%Y-%m-%d')}")
 
-        # Get Client Metadata from our global clients_df
-        client_row = clients_df[clients_df['client_name'] == target].iloc[0]
-        d_mark = float(client_row['daily_mark'])
-        c_id = client_row['client_id']
-        
-        # Live Stats (Direct Cloud Call)
-        stats = get_cloud_client_stats(target)
-        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {stats['total_cash']:,.2f}")
-        
+        # REFRESH BUTTON: Now correctly assigned to col_refresh
         with col_refresh:
             st.write("") 
-            if st.button("🔄 Refresh", use_container_width=True):
+            if st.button("🔄 Refresh", key="trans_refresh_btn", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
 
-        # Get Client Metadata
-        client_row = clients[clients['client_name'] == target].iloc[0]
+        # Get Client Metadata from our global clients_df
+        client_row = clients_df[clients_df['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
         c_id = client_row.get('client_id', 'N/A')
         
-        # --- SAAS UPDATE: Fetch live balance from Cloud DB (No local CSV sum!) ---
+        # --- SAAS UPDATE: Fetch live balance from Cloud DB ---
         with st.spinner("Syncing Ledger..."):
             stats = get_cloud_client_stats(target) 
             total_saved_ghs = stats['total_cash']
@@ -742,12 +758,13 @@ elif choice == "💸 Transactions":
                 'client_id': str(c_id), 
                 'client_name': target, 
                 'amount': db_amt,
-                'date': final_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                # Ensure date is stored as a string for Supabase
+                'date': final_timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(final_timestamp, datetime) else str(final_timestamp),
                 'fee': db_fee, 
-                'marks_covered': db_marks
+                'marks_covered': db_marks,
+                'tenant_id': st.session_state.get("tenant_id")
             }
             
-            # --- SAAS CHANGE: Using the direct Cloud write ---
             with st.spinner("Authorizing with RUCHANET Cloud..."):
                 response = cloud_db_insert("contributions", new_entry)
             
@@ -755,7 +772,7 @@ elif choice == "💸 Transactions":
                 st.success("✅ Transaction Synced!")
                 
                 generate_susu_receipt(
-                    idx=response['id'], # Use real DB ID for the receipt
+                    idx=response['id'], 
                     date_val=final_timestamp, 
                     client_name=target, 
                     amount=db_amt, 

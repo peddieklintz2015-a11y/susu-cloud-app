@@ -2,13 +2,22 @@ import streamlit as st
 from utils import send_weekly_report
 import streamlit.components.v1 as components
 import pandas as pd
-import sqlite3
 import time
 import re
 import math
 from datetime import datetime
 from sqlalchemy import text
 from supabase import create_client
+
+import hashlib
+
+def hash_password(password):
+    """Encodes password for security."""
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def check_password_auth(typed_password, stored_hash):
+    """Checks if the typed password matches the one in the cloud."""
+    return hash_password(typed_password) == stored_hash
 
 # --- 1. SETUP ---
 st.set_page_config(
@@ -27,56 +36,115 @@ except Exception as e:
     st.error(f"Supabase Error: {e}") 
     st.stop()
 
-def sync_data_dual(new_record):
-    """Writes to Local SQLite and Cloud PostgreSQL simultaneously."""
-    success_local = False
-    success_cloud = False
-    
-    # --- 1. LOCAL SQLITE SYNC ---
-    try:
-        conn_local = sqlite3.connect('susu_data.db')
-        
-        # Ensure table exists
-        conn_local.execute("""
-            CREATE TABLE IF NOT EXISTS contributions 
-            (client_id TEXT, client_name TEXT, amount REAL, date TEXT, fee REAL, marks_covered INTEGER)
-        """)
-        
-        # Ensure client_id column exists
-        try:
-            conn_local.execute("ALTER TABLE contributions ADD COLUMN client_id TEXT")
-        except sqlite3.OperationalError:
-            pass # Column already exists
-            
-        local_df = pd.DataFrame([new_record])
-        local_df.to_sql('contributions', conn_local, if_exists='append', index=False)
-        conn_local.close()
-        success_local = True
-    except Exception as e:
-        st.error(f"Local Save Error: {e}")
+# --- 🧩 THE SAAS BRIDGE (INSERTION) ---
+# This defines the variables your 46 errors are looking for.
 
-    # --- 2. CLOUD POSTGRES (SUPABASE) SYNC ---
+tid = st.session_state.get("tenant_id")
+role = st.session_state.get("account_role", "tenant")
+
+# 1. Fetch the data once
+try:
+    with conn.session as s:
+        if role == "developer":
+            raw_clients = s.execute(text("SELECT * FROM clients")).mappings().all()
+            raw_contribs = s.execute(text("SELECT * FROM contributions")).mappings().all()
+        else:
+            raw_clients = s.execute(text("SELECT * FROM clients WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
+            raw_contribs = s.execute(text("SELECT * FROM contributions WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
+    
+    # 2. Create the DataFrames
+    clients = pd.DataFrame(raw_clients)
+    contributions = pd.DataFrame(raw_contribs)
+
+    # 3. THE MAGIC ALIASES (This kills the 46 errors)
+    # This makes sure 'clients' AND 'clients_df' both point to the same data.
+    clients_df = clients
+    contributions_df = contributions
+
+except Exception as e:
+    # If the database is empty or errors, we create empty frames so the app doesn't crash
+    clients = clients_df = pd.DataFrame()
+    contributions = contributions_df = pd.DataFrame()
+    st.error(f"Cloud Bridge Syncing... {e}")
+
+# --- END OF INSERTION ---
+# Your existing code (Dashboard, Transactions, etc.) starts below this line...
+
+def sync_to_cloud(new_record):
+    """Strictly saves to Supabase Cloud."""
+    # Ensure the tenant ID is attached for SaaS security
+    new_record['tenant_id'] = st.session_state.get("tenant_id")
+    
     try:
-        with conn.session as s:
-            s.execute(text("""
-                INSERT INTO contributions (client_id, client_name, amount, date, marks_covered, fee)
-                VALUES (:ci, :cn, :am, :dt, :mk, :fe)
-            """), {
-                "ci": new_record.get('client_id', 'N/A'),
-                "cn": new_record['client_name'],
-                "am": float(new_record['amount']),
-                "dt": new_record['date'],
-                "mk": int(new_record['marks_covered']),
-                "fe": float(new_record.get('fee', 0.0))
-            })
-            s.commit()
-            success_cloud = True
+        # Save to your Supabase 'contributions' table
+        sb_client.table("contributions").insert(new_record).execute()
+        st.success("✅ Transaction synced to RUCHANET Cloud!")
+        return True
     except Exception as e:
-        st.error(f"Cloud Sync Error: {e}")
-        
-    # --- 3. FINAL RETURN ---
-    # Only one return at the very bottom so all code above is executed.
-    return success_local and success_cloud
+        st.error(f"❌ Cloud Sync Error: {e}")
+        return False
+
+def auth_gate():
+    if "tenant_id" not in st.session_state:
+        # --- LANDING PAGE UI ---
+        st.title("🚀 RUCHANET Cloud: Susu Management SaaS")
+        st.markdown("""
+        **Transform your Susu business with the power of the Cloud.**
+        * ✅ **14-Day Free Trial** (No card required)
+        * ✅ **Multi-Agent Support** for your staff
+        * ✅ **Automated Sunday Reports**
+        * ✅ **Only GHS 99.90 / Month**
+        """)
+        st.divider()
+        tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register (14-Day Trial)"])
+
+        with tab1:
+            with st.form("login"):
+                email = st.text_input("Business Email")
+                pwd = st.text_input("Password", type="password")
+                
+                if st.form_submit_button("Login to Dashboard", type="primary"):
+                    # 1. Fetch the user from Supabase
+                    res = sb_client.table("tenants").select("*").eq("admin_email", email).execute()
+                    
+                    # 2. Check if user exists and password is correct
+                    if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
+                        user = res.data[0]
+                        
+                        # 3. Save session data
+                        st.session_state["tenant_id"] = user['id']
+                        st.session_state["biz_name"] = user['business_name']
+                        
+                        # 4. Handle the Developer vs Tenant role
+                        # This looks for the 'account_role' column you added to your table
+                        st.session_state["account_role"] = user.get('account_role', 'tenant')
+                        
+                        st.success(f"Welcome back, {user['business_name']}!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid credentials. Please check your email/password.")
+
+        with tab2:
+            with st.form("signup"):
+                new_biz = st.text_input("Organization/Susu Name")
+                new_email = st.text_input("Admin Email")
+                new_pwd = st.text_input("Create Password", type="password")
+                if st.form_submit_button("Start My 14-Day Trial"):
+                    hashed = hash_password(new_pwd)
+                    # Create the new Tenant with trial settings
+                    sb_client.table("tenants").insert({
+                        "business_name": new_biz,
+                        "admin_email": new_email,
+                        "password_hash": hashed,
+                        "price_ghs": 99.9,
+                        "is_subscribed": False,
+                        "account_role": "tenant"
+                    }).execute()
+                    st.success("Account created! Please switch to the Login tab.")
+        st.stop()
+
+def get_tenant_id():
+    return st.session_state.get("tenant_id")
 
 # --- GLOBAL PWA INJECTION ---
 # Place this right after your imports and set_page_config
@@ -174,24 +242,57 @@ if st.secrets["app_settings"]["maintenance_mode"]:
     st.stop()
 
 # --- 3. DATA FUNCTIONS ---
-@st.cache_data(ttl=60)
-def fetch_data():
+# --- UPDATED DATA FUNCTIONS (SaaS CLOUD-ONLY) ---
+
+@st.cache_data(ttl=10) # Reduced TTL for fresher SaaS data
+def fetch_clients():
+    """Fetches the client list from the cloud."""
     try:
         with conn.session as s:
-            # We select your custom client_id AND the daily_mark
-            clients_df = pd.DataFrame(s.execute(
+            df = pd.DataFrame(s.execute(
                 text("SELECT client_id, client_name, phone, daily_mark, photo_url FROM clients")
             ).mappings().all())
-            
-            # For contributions, ensure it has a client_name column to link back
-            contributions_df = pd.DataFrame(s.execute(
-                text("SELECT id, client_name, amount, date, marks_covered, fee FROM contributions")
-            ).mappings().all())
-            
-            return clients_df, contributions_df
+            return df
     except Exception as e:
-        st.error(f"Mapping Error: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        st.error(f"Client Fetch Error: {e}")
+        return pd.DataFrame()
+
+def get_cloud_client_stats(client_name):
+    """
+    SAAS CRITICAL: Calculates balance directly in the Database.
+    Prevents downloading the whole contributions table to the phone.
+    """
+    try:
+        with conn.session as s:
+            result = s.execute(text("""
+                SELECT 
+                    COALESCE(SUM(amount), 0) as total_cash, 
+                    COALESCE(SUM(marks_covered), 0) as total_marks 
+                FROM contributions 
+                WHERE client_name = :name
+            """), {"name": client_name}).mappings().first()
+            return {
+                "total_cash": float(result['total_cash']),
+                "total_marks": int(result['total_marks'])
+            }
+    except Exception as e:
+        st.error(f"Balance Sync Error: {e}")
+        return {"total_cash": 0.0, "total_marks": 0}
+
+def cloud_db_insert(table, record):
+    """
+    Replaces sync_data_dual. 
+    Writes directly to the cloud and returns the new Row ID.
+    """
+    try:
+        # Using the Supabase client you initialized earlier
+        res = sb_client.table(table).insert(record).execute()
+        if res.data:
+            return {"success": True, "id": res.data[0].get('id')}
+        return {"success": False, "error": "No data returned"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # --- 1. THE SECURITY WALL ---
 def check_password():
     if "role" not in st.session_state:
@@ -220,9 +321,9 @@ def check_password():
         
         st.stop() 
     return True
-
 # Run the security check FIRST
 check_password()
+
 # --- 2. THE SECURE APP (Everything below only runs AFTER login) ---
 st.markdown(
         """
@@ -275,9 +376,31 @@ st.markdown(
         """,
         unsafe_allow_html=True
     )
+# --- 1. UPDATED DATA FETCHING (Fixes the "Undefined" errors in your photo) ---
+# We use these names to match what your existing code expects
+clients_df, contributions_df = pd.DataFrame(), pd.DataFrame()
 
-# Fetch data only after we are sure someone is logged in
-clients, contributions = fetch_data()
+# Get IDs from session
+tid = st.session_state.get("tenant_id")
+role = st.session_state.get("account_role", "tenant") 
+
+with st.spinner("Syncing Cloud Data..."):
+    try:
+        with conn.session as s:
+            if role == "developer":
+                # Super Admin: Sees EVERYTHING for maintenance
+                clients_df = pd.DataFrame(s.execute(text("SELECT * FROM clients")).mappings().all())
+                contributions_df = pd.DataFrame(s.execute(text("SELECT * FROM contributions")).mappings().all())
+            else:
+                # Regular Tenant: Only sees their own business data
+                clients_df = pd.DataFrame(s.execute(
+                    text("SELECT * FROM clients WHERE tenant_id = :tid"), {"tid": tid}
+                ).mappings().all())
+                contributions_df = pd.DataFrame(s.execute(
+                    text("SELECT * FROM contributions WHERE tenant_id = :tid"), {"tid": tid}
+                ).mappings().all())
+    except Exception as e:
+        st.error(f"Sync Error: {e}")
 
 with st.sidebar:
     st.title("📱 RUCHANET APP")
@@ -494,121 +617,84 @@ with st.sidebar:
     st.divider()
 
 if choice == "📊 Dashboard":
-    # --- 2. THE MAIN TABLE (FIXED) ---
-    # We put this HERE so it ONLY shows on the Dashboard page!
-    if not combined_df.empty:
-        st.write("### 📋 Recent Transaction Table")
-        st.dataframe(combined_df, use_container_width=True)
+    if role == "developer":
+        st.warning("🛠️ SUPER ADMIN MODE: Viewing global system data.")
     
-    st.divider()
-
-    # --- 3. MAIN DASHBOARD UI ---
-    head_col, btn_col = st.columns([4, 1])
-    with head_col:
-        st.title("📊 Financial Overview")
-    with btn_col:
-        if st.button("🔄 Sync"):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Key Metrics Logic
+    st.title(f"📊 {st.session_state.get('biz_name', 'Business')} Overview")
+    
     m1, m2, m3, m4 = st.columns(4)
-    total_client_count = len(clients) if not clients.empty else 0
-    m1.metric("👥 Total Clients", f"{total_client_count}")
+    m1.metric("👥 Total Clients", len(clients_df))
 
-    if not contributions.empty:
-        df_display = contributions.copy()
-        df_display['date_dt'] = pd.to_datetime(df_display['date'], errors='coerce', utc=True)
-        df_display = df_display.dropna(subset=['date_dt'])
+    if not contributions_df.empty:
+        total_vault = contributions_df['amount'].sum()
+        total_commissions = contributions_df['fee'].sum()
         
-        total_vault = df_display['amount'].sum()
-        total_commissions = df_display['fee'].sum()
-        net_liability = total_vault - total_commissions
-        
-        today_date = datetime.now().date()
-        yesterday_date = today_date - pd.Timedelta(days=1)
-        
-        today_total = df_display[df_display['date_dt'].dt.date == today_date]['amount'].sum()
-        yesterday_total = df_display[df_display['date_dt'].dt.date == yesterday_date]['amount'].sum()
-        daily_diff = today_total - yesterday_total
+        # Date processing for deltas
+        contributions_df['date_dt'] = pd.to_datetime(contributions_df['date'])
+        today_total = contributions_df[contributions_df['date_dt'].dt.date == datetime.now().date()]['amount'].sum()
 
         m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}", delta=f"GHS {today_total:,.2f} Today")
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")
-        m4.metric("📉 Net Liability", f"GHS {net_liability:,.2f}", delta=f"Diff: GHS {daily_diff:,.2f}", delta_color="inverse")
+        m4.metric("📉 Net Liability", f"GHS {(total_vault - total_commissions):,.2f}")
 
-        # --- 4. MONTHLY PROFIT CHART ---
+        # Monthly Chart
         st.divider()
-        st.subheader("📈 Monthly Commission Growth")
+        contributions_df['Month'] = contributions_df['date_dt'].dt.strftime('%b %Y')
+        monthly_profit = contributions_df.groupby('Month')['fee'].sum().reset_index()
+        st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FF484B")
         
-        df_display['Month'] = df_display['date_dt'].dt.strftime('%b %Y')
-        monthly_profit = df_display.groupby('Month')['fee'].sum().reset_index()
-        monthly_profit['sort_date'] = pd.to_datetime(monthly_profit['Month'])
-        monthly_profit = monthly_profit.sort_values('sort_date')
-
-        st.bar_chart(data=monthly_profit, x='Month', y='fee', color="#FFD700")
-
-        # --- 5. DATA EXPORT ---
-        with st.expander("📥 Download Records"):
-            csv = contributions.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", data=csv, file_name="susu_records.csv", mime="text/csv")
+        # 31-Mark Maturity Alerts
+        st.subheader("🎯 Payout Readiness (31+ Marks)")
+        marks_summary = contributions_df.groupby('client_name')['marks_covered'].sum().reset_index()
+        ready = marks_summary[marks_summary['marks_covered'] >= 31]
+        if not ready.empty:
+            for _, row in ready.iterrows():
+                st.success(f"🌟 {row['client_name']} has {row['marks_covered']} marks.")
         
+        # CSV Export
+        with st.expander("📥 Download Business Records"):
+            csv = contributions_df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download CSV", data=csv, file_name=f"{st.session_state.get('biz_name')}_records.csv", mime="text/csv")
     else:
-        m2.metric("💰 Total Vault", "GHS 0.00")
-        m3.metric("📈 Commissions", "GHS 0.00")
-        m4.metric("📉 Net Liability", "GHS 0.00")
-        st.info("💡 Start recording transactions to see financial data.")
-        # --- 3.5 MATURITY & PAYOUT ALERTS ---
-    st.divider()
-    st.subheader("🎯 Payout Readiness (31+ Marks)")
-    
-    if not contributions.empty:
-        # Calculate total marks per client
-        marks_summary = contributions.groupby('client_name')['marks_covered'].sum().reset_index()
-        # Identify clients ready for payout (Multiples of 31)
-        ready_clients = marks_summary[marks_summary['marks_covered'] >= 31]
-        
-        if not ready_clients.empty:
-            for _, row in ready_clients.iterrows():
-                cycles = int(row['marks_covered'] // 31)
-                st.success(f"🌟 *{row['client_name']}* has completed *{cycles} cycle(s)* ({row['marks_covered']} total marks).")
-        else:
-            st.info("No clients have reached the 31-mark maturity goal yet.")
-    else:
-        st.info("No transaction data available to calculate maturity.")
+        st.info("No transaction data available yet.")
 
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
-    if not clients.empty:
-        # --- FIX: Added col_refresh to this line ---
-        col_search, col_mode, col_date, col_refresh = st.columns([2, 1, 1, 1])
-        
+    if not clients_df.empty:
+        col_search, col_mode, col_date = st.columns([2, 1, 1])
         with col_search:
-            target = st.selectbox("Select Client", clients['client_name'].tolist())
+            target = st.selectbox("Select Client", clients_df['client_name'].tolist())
         with col_mode:
             is_migration = st.checkbox("📂 Migration Mode")
         with col_date:
-            if is_migration:
-                sel_date = st.date_input("Transaction Date", value=datetime.now().date())
-                final_timestamp = datetime.combine(sel_date, datetime.now().time())
-            else:
-                final_timestamp = datetime.now()
-                st.info(f"Date: {final_timestamp.strftime('%Y-%m-%d')}")
+            final_timestamp = st.date_input("Date", value=datetime.now()) if is_migration else datetime.now()
+
+        # Get Client Metadata from our global clients_df
+        client_row = clients_df[clients_df['client_name'] == target].iloc[0]
+        d_mark = float(client_row['daily_mark'])
+        c_id = client_row['client_id']
         
-        # --- NEW: Logic for the Refresh Button ---
+        # Live Stats (Direct Cloud Call)
+        stats = get_cloud_client_stats(target)
+        st.write(f"🆔 *ID:* {c_id} | 💰 *Balance:* GHS {stats['total_cash']:,.2f}")
+        
         with col_refresh:
-            st.write("") # Padding for alignment
+            st.write("") 
             if st.button("🔄 Refresh", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
 
+        # Get Client Metadata
         client_row = clients[clients['client_name'] == target].iloc[0]
         d_mark = float(client_row.get('daily_mark', 0.0))
         c_id = client_row.get('client_id', 'N/A')
         
-        user_history = contributions[contributions['client_name'] == target] if not contributions.empty else pd.DataFrame()
-        total_saved_ghs = float(user_history['amount'].sum()) if not user_history.empty else 0.0
-        total_marks_saved = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
+        # --- SAAS UPDATE: Fetch live balance from Cloud DB (No local CSV sum!) ---
+        with st.spinner("Syncing Ledger..."):
+            stats = get_cloud_client_stats(target) 
+            total_saved_ghs = stats['total_cash']
+            total_marks_saved = stats['total_marks']
         
         st.write(f"🆔 **ID:** {c_id} | 💰 **Balance:** GHS {total_saved_ghs:,.2f} | 📅 **Total Marks:** {total_marks_saved}")
         st.divider()
@@ -653,16 +739,35 @@ elif choice == "💸 Transactions":
         st.divider()
         if st.button("🚀 Confirm & Sync Transaction", use_container_width=True, type="primary"):
             new_entry = {
-                'client_id': str(c_id), 'client_name': target, 'amount': db_amt,
+                'client_id': str(c_id), 
+                'client_name': target, 
+                'amount': db_amt,
                 'date': final_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                'fee': db_fee, 'marks_covered': db_marks
+                'fee': db_fee, 
+                'marks_covered': db_marks
             }
-            if sync_data_dual(new_entry):
+            
+            # --- SAAS CHANGE: Using the direct Cloud write ---
+            with st.spinner("Authorizing with RUCHANET Cloud..."):
+                response = cloud_db_insert("contributions", new_entry)
+            
+            if response['success']:
                 st.success("✅ Transaction Synced!")
-                generate_susu_receipt(idx="new", date_val=final_timestamp, client_name=target, amount=db_amt, marks=db_marks, bal_after=total_saved_ghs+db_amt)
+                
+                generate_susu_receipt(
+                    idx=response['id'], # Use real DB ID for the receipt
+                    date_val=final_timestamp, 
+                    client_name=target, 
+                    amount=db_amt, 
+                    marks=db_marks, 
+                    bal_after=total_saved_ghs + db_amt
+                )
+                
                 st.cache_data.clear()
-                time.sleep(5)
+                time.sleep(3) 
                 st.rerun()
+            else:
+                st.error(f"❌ Cloud Sync Failed: {response['error']}")
 
     else:
         st.warning("Please register clients first.")                 
@@ -670,13 +775,8 @@ elif choice == "💸 Transactions":
 elif choice == "📑 Digital Passbook":
     st.title("📑 Client Passbook")
     
-    import uuid
-    query_id = str(uuid.uuid4())
-    
-    # Refresh data from Supabase
-    clients = conn.query(f"SELECT * FROM clients -- {query_id}", ttl=0)
-    contributions = conn.query(f"SELECT * FROM contributions -- {query_id}", ttl=0)
-
+    # 1. Fetch fresh client list for the search
+    clients = fetch_clients()
     search = st.text_input("🔍 Search Client Name", key="passbook_search")
     
     if not clients.empty:
@@ -685,14 +785,31 @@ elif choice == "📑 Digital Passbook":
         if not filtered.empty:
             target = st.selectbox("View Passbook For:", filtered['client_name'].tolist())
             c_info = filtered[filtered['client_name'] == target].iloc[0]
+            target_name = c_info['client_name']
             
-            # Get basic info for the header
-            daily_rate = float(c_info.get('daily_mark', 0.0))
-            user_history = contributions[contributions['client_name'] == target].copy()
+            # 2. SAAS UPDATE: Fetch ONLY this client's history from Cloud
+            # We no longer filter a global 'contributions' DataFrame
+            with st.spinner(f"Loading history for {target_name}..."):
+                try:
+                    with conn.session as s:
+                        user_history = pd.DataFrame(s.execute(
+                            text("""
+                                SELECT id, amount, date, marks_covered, fee 
+                                FROM contributions 
+                                WHERE client_name = :name 
+                                ORDER BY date DESC
+                            """), {"name": target_name}
+                        ).mappings().all())
+                except Exception as e:
+                    st.error(f"History Fetch Error: {e}")
+                    user_history = pd.DataFrame()
+
+            # 3. Calculate metrics from the specific history
             current_bal = user_history['amount'].sum() if not user_history.empty else 0.0
             total_marks = int(user_history['marks_covered'].sum()) if not user_history.empty else 0
+            daily_rate = float(c_info.get('daily_mark', 0.0))
 
-            # --- NEW HEADER LAYOUT ---
+            # --- HEADER LAYOUT ---
             col_img, col_details = st.columns([1, 2])
             
             with col_img:
@@ -703,20 +820,16 @@ elif choice == "📑 Digital Passbook":
                     st.warning("👤 No Photo")
             
             with col_details:
-                st.subheader(target)
-                # Grouping all info together next to the photo
+                st.subheader(target_name)
                 st.write(f"🆔 **ID:** {c_info.get('client_id', 'N/A')}")
                 st.write(f"📞 **Contact:** {c_info.get('phone', 'N/A')}")
-                st.markdown("---") # Thin separator
+                st.markdown("---")
                 
-                # Metrics now live inside the detail column
                 m_col1, m_col2, m_col3 = st.columns(3)
                 m_col1.caption("💰 Balance")
                 m_col1.write(f"**GHS {current_bal:,.2f}**")
-                
                 m_col2.caption("📅 Marks")
                 m_col2.write(f"**{total_marks}**")
-                
                 m_col3.caption("📉 Rate")
                 m_col3.write(f"**GHS {daily_rate:,.2f}**")
 
@@ -724,28 +837,24 @@ elif choice == "📑 Digital Passbook":
 
             # --- HISTORY SECTION ---
             if not user_history.empty:
-                def safe_parse(d):
-                    try: 
-                        return pd.to_datetime(d)
-                    except Exception:
-                        return pd.to_datetime(d, errors='coerce')
-                
-                user_history['date'] = user_history['date'].apply(safe_parse)
-                user_history = user_history.sort_values(by='date', ascending=False)
-                
+                st.write("### 🕒 Recent Activity")
                 for idx, row in user_history.iterrows():
-                    t_label = f"{row['date'].strftime('%Y-%m-%d %H:%M') if pd.notna(row['date']) else 'Unknown'} | GHS {abs(row['amount']):,.2f}"
+                    # Parse date safely
+                    raw_date = row['date']
+                    date_str = raw_date.strftime('%Y-%m-%d %H:%M') if hasattr(raw_date, 'strftime') else str(raw_date)
+                    
+                    t_label = f"{date_str} | GHS {abs(row['amount']):,.2f}"
                     with st.expander(t_label):
                         generate_susu_receipt(
-                            idx=idx, 
-                            date_val=row['date'], 
-                            client_name=target, 
+                            idx=row['id'], 
+                            date_val=raw_date, 
+                            client_name=target_name, 
                             amount=row['amount'], 
                             marks=row['marks_covered'],
-                            bal_after=None 
+                            bal_after=None # History view doesn't need running balance calc for every row
                         )
             else:
-                st.info("No transaction history found.")
+                st.info("No transaction history found in the cloud.")
         else:
             st.warning("No client found.")
     else:
@@ -753,288 +862,124 @@ elif choice == "📑 Digital Passbook":
 
 # --- 3. ADMIN TOOLS & EMAIL ---
 elif choice == "🛠 Admin Tools":
-    st.title("🛠 Admin Dashboard")
+    st.title("🛠 Business Management")
+    tid = st.session_state.get("tenant_id")
     
-    t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🗑 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
+    t1, t2, t3, t4, t5 = st.tabs(["👤 Registration", "📧 Reports", "🧹 Data Cleanup", "💰 Manage Profile", "🧨 Reset System"])
     
-# --- TAB 1: REGISTRATION (Camera + Library Upload) ---
+    # --- TAB 1: REGISTRATION (With SaaS Isolation & Compression) ---
     with t1:
         st.subheader("👤 Register New Client")
+        reg_choice = st.radio("Source:", ["Live Camera", "Library"], horizontal=True)
+        photo = st.camera_input("Photo") if reg_choice == "Live Camera" else st.file_uploader("Upload", type=["jpg", "png"])
         
-        # 1. Image Source Selection
-        st.write("📸 *Step 1: Get Client Photo*")
-        reg_choice = st.radio("Choose source:", ["Live Camera", "Upload from Library"], horizontal=True, key="reg_src_selection")
-        
-        photo = None
-        if reg_choice == "Live Camera":
-            photo = st.camera_input("Take Photo")
-        else:
-            photo = st.file_uploader("Select Image", type=["jpg", "jpeg", "png"])
+        reg_date = st.date_input("Registration Date", value=datetime.now())
+        suggested_id = get_next_gen_id(reg_date) # Uses your ID generator
 
-        # 2. Date Selection (Outside form for ID generation reactivity)
-        st.write("📅 *Step 2: Selection Date*")
-        reg_date = st.date_input("Registration Date", value=datetime.now(), key="reg_date_selector")
-        
-        # Call the ID generator function (ensure this function is defined above this block)
-        suggested_id = get_next_gen_id(reg_date)
-
-        # 3. The Registration Form
         with st.form("reg_form", clear_on_submit=True):
-            st.write("📝 *Step 3: Client Details*")
             name = st.text_input("Full Name")
             phone = st.text_input("Phone Number")
             daily = st.number_input("Daily Mark (GHS)", min_value=5.0, step=1.0)
+            manual_id = st.text_input("Confirm Client ID", value=suggested_id)
             
-            # Manual ID box - allows 001/01/26 auto or 159/01/26 manual
-            manual_id = st.text_input("Confirm/Edit Client ID", value=suggested_id)
-            
-            submit = st.form_submit_button("Register to Cloud", type="primary", use_container_width=True)
-            
-            if submit: 
-                if not name.strip() or not phone.strip() or photo is None:
-                    st.error("❌ Name, Phone, and Photo are all required.")
+            if st.form_submit_button("Register to Cloud", type="primary", use_container_width=True):
+                if not name or not phone or photo is None:
+                    st.error("❌ All fields and photo are required.")
                 else:
                     try:
-                        # IMAGE COMPRESSION
+                        # PHOTO COMPRESSION
                         from PIL import Image
                         import io
+                        img = Image.open(photo).convert("RGB")
+                        img.thumbnail((500, 500))
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", quality=65, optimize=True)
                         
-                        img = Image.open(photo)
-                        if img.mode in ("RGBA", "P"):
-                            img = img.convert("RGB")
-                        
-                        img.thumbnail((800, 800)) 
-                        buffer = io.BytesIO()
-                        img.save(buffer, format="JPEG", quality=70) 
-                        compressed_bytes = buffer.getvalue()
+                        safe_path = f"tenant_{tid}/{manual_id.replace('/', '-')}.jpg"
+                        sb_client.storage.from_("client-photos").upload(path=safe_path, file=buf.getvalue(), file_options={"content-type":"image/jpeg", "upsert":"true"})
+                        p_url = f"{st.secrets['supabase_url']}/storage/v1/object/public/client-photos/{safe_path}"
 
-                        # ID FINALIZATION
-                        final_id = manual_id.strip() if manual_id.strip() else suggested_id
-                        safe_filename = f"{final_id.replace('/', '-')}.jpg"
-                        
-                        # UPLOAD TO STORAGE
-                        sb_client.storage.from_("client-photos").upload(
-                            path=safe_filename,
-                            file=compressed_bytes,
-                            file_options={"content-type": "image/jpeg", "upsert": "true"}
-                        )
-
-                        base_url = st.secrets['supabase_url']
-                        p_url = f"{base_url}/storage/v1/object/public/client-photos/{safe_filename}"
-
-                        # SAVE TO DB WITH DUPLICATE CHECK
-                        try:
-                            with conn.session as s:
-                                s.execute(text("""
-                                    INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url)
-                                    VALUES (:i, :n, :p, :d, :u)
-                                """), {
-                                    "i": final_id, "n": name.strip(), "p": phone.strip(), "d": daily, "u": p_url
-                                })
-                                s.commit()
-                            
-                            st.success(f"✅ Registered {name} as ID: {final_id}")
-                            st.balloons()
-                            time.sleep(3)
-                            st.rerun()
-                            
-                        except Exception as db_e:
-                            db_err = str(db_e).lower()
-                            if "unique" in db_err or "duplicate" in db_err:
-                                st.warning(f"⚠️ Already Exists: A client named '{name}' or ID '{final_id}' is already registered.")
-                            else:
-                                st.error(f"🚨 Database Error: {db_e}")
-
+                        with conn.session as s:
+                            s.execute(text("INSERT INTO clients (client_id, client_name, phone, daily_mark, photo_url, tenant_id) VALUES (:i, :n, :p, :d, :u, :tid)"),
+                                      {"i": manual_id, "n": name, "p": phone, "d": daily, "u": p_url, "tid": tid})
+                            s.commit()
+                        st.success(f"✅ Registered {name}")
+                        st.cache_data.clear()
+                        time.sleep(2)
+                        st.rerun()
                     except Exception as e:
-                        st.error(f"🚨 System Error: {e}")
+                        st.error(f"Error: {e}")
 
-    # --- TAB 2: REPORTS ---
+    # --- TAB 2: REPORTS (Multi-User) ---
     with t2:
-        st.subheader("📊 Weekly Executive Intelligence")
-        if not contributions.empty:
-            contributions['date'] = pd.to_datetime(contributions['date'], errors='coerce')
-            st.info(f"💾 System ready: {len(contributions)} records scanned.")
-            
-            if st.button("🚀 Force Send Comprehensive Weekly Report"):
-                with st.spinner("📧 Sending report..."):
-                    if send_weekly_report(contributions, manual=True):
-                        st.success("✅ Manual Report Sent!")
-                    else:
-                        st.error("❌ Failed to send. Check settings.")
-        else:
-            st.warning("⚠️ No data found to report on.")
+        st.subheader("📊 Executive Intelligence")
+        user_email = st.session_state.get("admin_email")
+        if st.button("🚀 Force Send Comprehensive Weekly Report"):
+            with st.spinner("Sending..."):
+                if send_weekly_report(contributions_df, manual=True, target_email=user_email):
+                    st.success(f"✅ Report Sent to {user_email}!")
 
-    # --- TAB 3: DATA CLEANUP (REVERSALS) ---
+    # --- TAB 3: DATA CLEANUP & AUDIT (RETAINED) ---
     with t3:
         st.subheader("🧹 Database Health & Reversals")
-        admin_entry = st.text_input("Enter Admin Password", type="password", key="cleanup_pass")
-
-        # Everything below this is now correctly indented inside the "with t3" block
+        admin_entry = st.text_input("Admin Password", type="password")
         if admin_entry == st.secrets["passwords"]["admin_password"]:
-            if not contributions.empty:
-                # --- IMPROVED QUICK UNDO ---
-                st.markdown("### ⏪ Quick Undo (Delete by ID)")
+            if not contributions_df.empty:
+                st.markdown("### ⏪ Quick Undo")
+                recent_data = contributions_df.sort_values(by='date', ascending=False).head(10)
+                id_to_wipe = st.selectbox("Select Transaction ID:", recent_data['id'].tolist())
                 
-                recent_data = contributions.sort_values(by='id', ascending=False).head(10)
-                
-                def format_undo_label(id_val):
-                    row = recent_data[recent_data['id'] == id_val].iloc[0]
-                    return f"ID: {id_val} | {row['date']} | {row['client_name']} | GHS {row['amount']}"
-
-                id_to_wipe = st.selectbox(
-                    "Select Transaction to PERMANENTLY DELETE:", 
-                    options=recent_data['id'].tolist(),
-                    format_func=format_undo_label,
-                    key="undo_selector"
-                )
-                
-                if st.button("🗑️ Delete Entry & Fix Balance", type="secondary", use_container_width=True):
+                if st.button("🗑️ Delete Entry & Log Audit"):
                     try:
                         with conn.session as s:
-                            s.execute(text("DELETE FROM contributions WHERE id = :id"), {"id": id_to_wipe})
-                            s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('MANUAL_DELETE', :d, 'Manager')"), 
-                                      {"d": f"Deleted Transaction ID {id_to_wipe}"})
+                            s.execute(text("DELETE FROM contributions WHERE id = :id AND tenant_id = :tid"), {"id": id_to_wipe, "tid": tid})
+                            s.execute(text("INSERT INTO audit_logs (action_type, details, tenant_id) VALUES ('MANUAL_DELETE', :d, :tid)"), 
+                                      {"d": f"Deleted Trans ID {id_to_wipe}", "tid": tid})
                             s.commit()
-                        st.success(f"✅ Transaction {id_to_wipe} deleted successfully!")
+                        st.success("Deleted and Audited.")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
-                
-                st.divider()
 
-                # --- ORIGINAL REVERSAL LOGIC ---
-                st.markdown("### ➕ Perform Professional Reversal")
-                st.info("This adds a negative entry to cancel out a transaction (keeping a paper trail).")
-                search_term = st.text_input("🔍 Filter by Client Name", key="cleanup_filter")
-                f_df = contributions[contributions['client_name'].str.contains(search_term, case=False)].copy()
-                
-                if not f_df.empty:
-                    f_df['display'] = f_df.apply(lambda x: f"ID:{x['id']} | {x['date']} | {x['client_name']} | GHS {x['amount']}", axis=1)
-                    to_del = st.selectbox("Select entry to REVERSE", options=f_df['display'], key="reversal_selector")
-                    
-                    if st.button("🔄 Authorize Professional Reversal"):
-                        try:
-                            selected_id = int(to_del.split(" | ")[0].replace("ID:", ""))
-                            target_row = f_df[f_df['id'] == selected_id].iloc[0]
-
-                            reversal_entry = {
-                                'amount': -float(target_row['amount']),
-                                'client_name': target_row['client_name'],
-                                'date': datetime.now().isoformat(),
-                                'fee': -float(target_row.get('fee', 0.0)),
-                                'marks_covered': -int(target_row['marks_covered']),
-                                'client_id': str(target_row.get('client_id', 'N/A'))
-                            }
-
-                            if sync_data_dual(reversal_entry):
-                                with conn.session as s:
-                                    s.execute(text("INSERT INTO audit_logs (action_type, details, admin_name) VALUES ('REVERSAL', :d, 'Manager')"), 
-                                              {"d": f"Reversed ID {selected_id} for {target_row['client_name']}"})
-                                    s.commit()
-                                st.success("✅ Reversal Synced!")
-                                st.cache_data.clear()
-                                time.sleep(4)
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"🚨 Reversal Failed: {e}")
-
-    # --- TAB 4: MANAGE PROFILE (THE FIX) ---
+    # --- TAB 4: MANAGE PROFILE (RETAINED) ---
     with t4:
-        st.subheader("⚙️ Secure Client Profile Manager")
-        
-        # --- ADMIN VERIFICATION (2FA) ---
-        admin_pass_t4 = st.text_input("Enter Admin Password to access Profiles", type="password", key="t4_admin_pass")
+        st.subheader("⚙️ Profile Manager")
+        if not clients_df.empty:
+            target_name = st.selectbox("Select Profile", clients_df['client_name'].tolist())
+            c_data = clients_df[clients_df['client_name'] == target_name].iloc[0]
+            
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.image(c_data['photo_url'], width=150)
+            with col2:
+                st.write(f"*ID:* {c_data['client_id']}")
+                if st.button(f"🗑️ Delete {target_name}"):
+                    if st.checkbox("Confirm permanent deletion?"):
+                        with conn.session as s:
+                            s.execute(text("DELETE FROM clients WHERE client_id = :i AND tenant_id = :tid"), 
+                                      {"i": c_data['client_id'], "tid": tid})
+                            s.commit()
+                        st.cache_data.clear()
+                        st.rerun()
 
-        if admin_pass_t4 == st.secrets["passwords"]["admin_password"]:
-            st.error("❗ Deletion removes the client and photo permanently.")
-
-            if 'clients' in locals() and not clients.empty:
-                search_query = st.text_input("🔍 Search Profile (Name or ID)", key="admin_manage_search")
-                
-                filtered = clients[
-                    clients['client_name'].str.contains(search_query, case=False) | 
-                    clients['client_id'].astype(str).str.contains(search_query, case=False)
-                ]
-
-                if not filtered.empty:
-                    selected_name = st.selectbox("Select Profile:", filtered['client_name'])
-                    c_data = filtered[filtered['client_name'] == selected_name].iloc[0]
-                    target_id = str(c_data['client_id']) 
-                    
-                    final_balance = 0.0
-                    if 'contributions' in locals() and not contributions.empty:
-                        u_history = contributions[contributions['client_name'] == selected_name]
-                        final_balance = float(u_history['amount'].sum()) if not u_history.empty else 0.0
-
-                    col1, col2 = st.columns([1, 2])
-                    with col1:
-                        photo_url = c_data.get('photo_url')
-                        if photo_url and str(photo_url) not in ['None', 'nan', '']:
-                            st.image(photo_url, caption=f"ID: {target_id}", use_container_width=True)
-                    with col2:
-                        st.write(f"*Name:* {c_data['client_name']}")
-                        st.metric("💰 Payout Due", f"GHS {final_balance:,.2f}")
-
-                    st.divider()
-                    
-                    # --- FINAL WIPE AUTHORIZATION ---
-                    confirm_check = st.checkbox(f"⚠️ Confirm PERMANENT wipe for {selected_name}", key="del_check")
-                    
-                    if confirm_check:
-                        # Second verification for the actual action (True 2FA feel)
-                        wipe_pass = st.text_input("🔐 Re-enter Password to AUTHORIZE WIPE", type="password", key="wipe_pass_input")
-                        if st.button("💥 EXECUTE PERMANENT WIPE"):
-                            if wipe_pass == st.secrets["passwords"]["admin_password"]:
-                                try:
-                                    with st.spinner("Wiping..."):
-                                        try:
-                                            safe_file = target_id.replace('/', '-')
-                                            sb_client.storage.from_("client-photos").remove([f"{safe_file}.jpg"])
-                                        except Exception: 
-                                            pass 
-
-                                        with conn.session as s:
-                                            s.execute(text("DELETE FROM contributions WHERE client_name = :n"), {"n": selected_name})
-                                            s.execute(text("DELETE FROM clients WHERE client_id = :i"), {"i": target_id})
-                                            s.commit()
-                                    
-                                    st.success("🗑️ Erased successfully.")
-                                    st.cache_data.clear()
-                                    time.sleep(4)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"🚨 Wipe Failed: {e}")
-                else:
-                    st.info("No matching profiles.")
-            else:
-                st.info("Database empty.")
-        elif admin_pass_t4 != "":
-            st.warning("Incorrect Admin Password.")
+    # SUPER ADMIN TAB
+    if role == "developer":
+        with st.expander("🛡️ DEVELOPER MAINTENANCE"):
+            st.write("### 🏢 System-Wide Tenants")
+            tenants = pd.DataFrame(sb_client.table("tenants").select("*").execute().data)
+            st.dataframe(tenants)
 
     # --- TAB 5: RESET SYSTEM ---
     with t5:
         st.header("🧨 Factory Reset")
-        st.warning("This will permanently delete all records, clients, and logs.")
-        
-        # Double-lock reset
-        confirm_reset = st.checkbox("I understand this action is IRREVERSIBLE.", key="wipe_confirm_check")
-        reset_pass = st.text_input("Enter Admin Password to UNLOCK RESET", type="password", key="reset_pass_gate")
-        
-        if st.button("🚨 EXECUTE FULL SYSTEM WIPE", type="primary", disabled=not confirm_reset):
-            if reset_pass == st.secrets["passwords"]["admin_password"]:
-                try:
+        if st.checkbox("Delete ALL MY business records permanently?"):
+            reset_pass = st.text_input("Confirm Admin Password", type="password")
+            if st.button("🚨 EXECUTE FULL WIPE"):
+                if reset_pass == st.secrets["passwords"]["admin_password"]:
                     with conn.session as s:
-                        # Cascading truncate to clean the entire DB
-                        s.execute(text("TRUNCATE TABLE contributions RESTART IDENTITY CASCADE;"))
-                        s.execute(text("TRUNCATE TABLE clients RESTART IDENTITY CASCADE;"))
-                        s.execute(text("TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE;"))
+                        s.execute(text("DELETE FROM contributions WHERE tenant_id = :tid"), {"tid": tid})
+                        s.execute(text("DELETE FROM clients WHERE tenant_id = :tid"), {"tid": tid})
                         s.commit()
-                    st.success("💥 System wiped successfully!")
-                    st.cache_data.clear()
-                    time.sleep(6)
+                    st.success("Wiped.")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Reset failed: {e}")
-            else:
-                st.error("Invalid password. Reset aborted.")

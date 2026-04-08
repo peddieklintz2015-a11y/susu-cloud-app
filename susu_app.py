@@ -677,7 +677,8 @@ if choice == "📊 Dashboard":
 elif choice == "💸 Transactions":
     st.title("💸 Record Transactions")
     
-    if not clients_df.empty:
+    # Force a quick check of the global dataframe
+    if clients_df is not None and len(clients_df) > 0:
         # FIX: Added 'col_refresh' to the columns definition here
         col_search, col_mode, col_date, col_refresh = st.columns([2, 1, 1, 1])
         

@@ -632,9 +632,15 @@ if choice == "📊 Dashboard":
         total_commissions = contributions_df['fee'].sum()
         
         # Date processing for deltas
-        contributions_df['date_dt'] = pd.to_datetime(contributions_df['date'])
-        today_date = datetime.now().date()
-        today_total = contributions_df[contributions_df['date_dt'].dt.date == today_date]['amount'].sum()
+        # This adds 'errors=coerce' which turns bad dates into 'NaT' (Not a Time) instead of crashing
+        contributions_df['date_dt'] = pd.to_datetime(contributions_df['date'], errors='coerce')
+
+        # Optional: Remove rows with bad dates so the dashboard stays clean
+        contributions_df = contributions_df.dropna(subset=['date_dt'])
+
+        # Calculate today's total for the 'delta' display
+        today_date = pd.Timestamp.now().normalize()
+        today_total = contributions_df[contributions_df['date_dt'].dt.normalize() == today_date]['amount'].sum()
 
         m2.metric("💰 Total Vault", f"GHS {total_vault:,.2f}", delta=f"GHS {today_total:,.2f} Today")
         m3.metric("📈 Commissions", f"GHS {total_commissions:,.2f}")

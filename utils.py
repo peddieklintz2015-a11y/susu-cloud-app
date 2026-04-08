@@ -3,11 +3,25 @@ from datetime import datetime
 import smtplib
 from email.message import EmailMessage # <--- THIS FIXES THE RED ERROR
 import streamlit as st  # <--- THIS FIXES THE 'st' ERRORS
-import os
-def send_weekly_report(contributions_df, manual=False):
+import hashlib
+
+def hash_password(password):
+    """Encodes password for security."""
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def check_password_auth(password, hashed):
+    """Checks if entered password matches the cloud record."""
+    return hash_password(password) == hashed
+
+def send_weekly_report(contributions_df, manual=False, target_email=None):
     try:
         now_dt = datetime.now()
         today = now_dt.date()
+        
+        # Ensure 'date' is datetime objects for filtering
+        if not pd.api.types.is_datetime64_any_dtype(contributions_df['date']):
+            contributions_df['date'] = pd.to_datetime(contributions_df['date'])
+            
         start_of_week = today - pd.Timedelta(days=today.weekday())
         end_of_week = start_of_week + pd.Timedelta(days=6)
         
@@ -21,6 +35,8 @@ def send_weekly_report(contributions_df, manual=False):
 
         week_data['Day'] = week_data['date'].dt.strftime('%A')
         day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # Calculate daily summaries
         summary = week_data.groupby('Day').agg({
             'amount': [lambda x: x[x > 0].sum(), lambda x: abs(x[x < 0].sum())],
             'fee': 'sum'
@@ -45,7 +61,7 @@ def send_weekly_report(contributions_df, manual=False):
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
                 <div style="background-color: #212529; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
-                    <h1 style="color: #FFD700; margin: 0;">RUCHANET WEEKLY SUMMARY</h1>
+                    <h1 style="color: #FFD700; margin: 0;">{st.session_state.get('biz_name', 'RUCHANET')} WEEKLY SUMMARY</h1>
                     <p style="color: #fff; margin: 5px 0 0 0;">Week: {start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b, %Y')}</p>
                 </div>
                 <div style="padding: 20px; border: 1px solid #ddd;">
@@ -65,19 +81,20 @@ def send_weekly_report(contributions_df, manual=False):
                         <p style="margin: 5px 0;"><b>Total Weekly Commission:</b> GHS {weekly_commissions:,.2f}</p>
                         <p style="margin: 5px 0; font-size: 18px; color: #2c3e50;"><b>Final Vault Balance: GHS {total_vault:,.2f}</b></p>
                     </div>
-                    <p style="font-size: 12px; color: #888; margin-top: 20px;">Generated at: {now_dt.strftime('%Y-%m-%d %I:%M %p')}</p>
                 </div>
             </body>
         </html>
         """
 
-        # Try to get credentials from GitHub (Robot) or Streamlit (App)
-        SENDER = os.getenv("SENDER_EMAIL") or st.secrets["emails"]["sender_email"]
-        RECEIVER = os.getenv("RECEIVER_EMAIL") or st.secrets["emails"]["receiver_email"]
-        APP_PW = os.getenv("EMAIL_PASSWORD") or st.secrets["emails"]["app_password"]
+        # Credentials
+        SENDER = st.secrets["emails"]["sender_email"]
+        APP_PW = st.secrets["emails"]["app_password"]
+        
+        # Use target_email from session state if provided, else use default receiver
+        RECEIVER = target_email if target_email else st.secrets["emails"]["receiver_email"]
 
         msg = EmailMessage()
-        msg['Subject'] = f"📊 {'AUTO' if not manual else 'MANUAL'} Report: {start_of_week.strftime('%d %b')}"
+        msg['Subject'] = f"📊 {'AUTO' if not manual else 'MANUAL'} Report: {st.session_state.get('biz_name')} ({start_of_week.strftime('%d %b')})"
         msg['From'] = SENDER
         msg['To'] = RECEIVER
         msg.add_alternative(html_content, subtype='html')
@@ -88,5 +105,5 @@ def send_weekly_report(contributions_df, manual=False):
         return True
     except Exception as e:
         if manual: 
-            st.error(f"Error: {e}")
+            st.error(f"Email Error: {e}")
         return False

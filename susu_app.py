@@ -80,13 +80,17 @@ if "tenant_id" not in st.session_state:
                 # Check if user exists and match the plain password to the cloud hash
                 if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
                     user = res.data[0]
-                    # This LOCKS the app to this specific business
+                    
+                    # --- FIXED BLOCK START ---
                     st.session_state.update({
                         "tenant_id": user['id'],
                         "biz_name": user['business_name'],
+                        "admin_email": user.get('admin_email'), # Important for reports
                         "account_role": user.get('account_role', 'tenant'),
                         "role": "Manager" 
                     })
+                    # --- FIXED BLOCK END ---
+                    
                     st.success(f"Welcome back, {user['business_name']}!")
                     time.sleep(1)
                     st.rerun()

@@ -43,10 +43,11 @@ if "tenant_id" not in st.session_state:
     st.title("🚀 Welcome to MY SUSU APP")
     st.markdown("""
     ### The Ultimate Cloud Solution for your Susu Business
-    * ✅ **Secure Cloud Storage** & Real-time Client Passbooks
-    * ✅ **Automated Sunday Reports** for Managers
-    * ✅ **GHS 99.90 / Month** (14-Day Free Trial)
+    * ✅ *Secure Cloud Storage* & Real-time Client Passbooks
+    * ✅ *Automated Sunday Reports* for Managers
+    * ✅ *GHS 99.90 / Month* (14-Day Free Trial)
     """)
+    
     st.markdown("## 🛠️ Powerful Features for Susu Managers")
     col1, col2, col3, col4 = st.columns(4)
 
@@ -55,13 +56,17 @@ if "tenant_id" not in st.session_state:
     with col2:
         st.success("### 📊 Auto-Reports\nWeekly Sunday reports sent via WhatsApp/Email.")
     with col3:
-        st.markdown("### 🏦 Bank-Grade Security\nAll data is encrypted before it hits the cloud.")
+        st.warning("### 🏦 Bank-Grade Security\nAll data is encrypted before it hits the cloud.")
     with col4:
-        st.markdown("### 📱 Mobile Ready\nInstall this app on your Android or iPhone for easy access.")
+        st.error("### 📱 Mobile Ready\nInstall this app on your Android or iPhone for easy access.")
+    
     st.divider()
-    # This adds the Video Tour you wanted
+    
+    # Video Section for Professionalism
     st.markdown("### 📽️ See MY SUSU APP in Action")
-    st.video("https://www.youtube.com/watch?v=your_video_id") # Use your tutorial link here!
+    # Replace the ID below with your YouTube video ID
+    st.video("https://www.youtube.com/watch?v=your_video_id") 
+    
     tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register Business"])
     
     with tab1:
@@ -72,6 +77,7 @@ if "tenant_id" not in st.session_state:
                 # Fetch user from Supabase
                 res = sb_client.table("tenants").select("*").eq("admin_email", email).execute()
                 
+                # Check if user exists and match the plain password to the cloud hash
                 if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
                     user = res.data[0]
                     # This LOCKS the app to this specific business
@@ -79,7 +85,7 @@ if "tenant_id" not in st.session_state:
                         "tenant_id": user['id'],
                         "biz_name": user['business_name'],
                         "account_role": user.get('account_role', 'tenant'),
-                        "role": "Manager" # Sets access level for sidebar
+                        "role": "Manager" 
                     })
                     st.success(f"Welcome back, {user['business_name']}!")
                     time.sleep(1)
@@ -93,7 +99,7 @@ if "tenant_id" not in st.session_state:
             new_email = st.text_input("Admin Email")
             new_pwd = st.text_input("Create Password", type="password")
             if st.form_submit_button("Start 14-Day Trial", use_container_width=True):
-                hashed = hash_password(new_pwd)
+                hashed = hash_password(new_pwd) # Securely hash before storing
                 sb_client.table("tenants").insert({
                     "business_name": new_biz,
                     "admin_email": new_email,
@@ -102,13 +108,9 @@ if "tenant_id" not in st.session_state:
                     "is_subscribed": False
                 }).execute()
                 st.success("Account created! Please switch to the Login tab.")
+    
     st.stop() # 🛑 Stops the rest of the app until login is successful
 
-try:
-    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-except Exception as e:
-    st.error(f"Supabase Error: {e}") 
-    st.stop()
 def get_tenant_id():
     return st.session_state.get("tenant_id")
 

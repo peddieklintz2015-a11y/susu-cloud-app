@@ -74,6 +74,15 @@ if "tenant_id" not in st.session_state:
                     st.rerun()
                 else:
                     st.error("Invalid credentials. Please check your email/password.")
+                    st.markdown("## 🛠️ Powerful Features for Susu Managers")
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.info("### ☁️ Cloud Sync\nAccess your data from any phone, anywhere.")
+                with col2:
+                    st.success("### 📊 Auto-Reports\nWeekly Sunday reports sent via WhatsApp/Email.")
+                with col3:
+                    st.warning("### 🔐 Secure\nBank-grade encryption for all client balances.")
 
     with tab2:
         with st.form("signup_form"):

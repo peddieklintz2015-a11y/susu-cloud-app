@@ -30,60 +30,6 @@ st.set_page_config(
 conn = st.connection("postgresql", type="sql")
 menu = ["📊 Dashboard", "💸 Transactions", "📑 Digital Passbook", "🛠 Admin Tools"]
 
-try:
-    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
-except Exception as e:
-    st.error(f"Supabase Error: {e}") 
-    st.stop()
-
-# --- 🧩 THE SAAS BRIDGE (INSERTION) ---
-# This defines the variables your 46 errors are looking for.
-
-tid = st.session_state.get("tenant_id")
-role = st.session_state.get("account_role", "tenant")
-
-# 1. Fetch the data once
-try:
-    with conn.session as s:
-        if role == "developer":
-            raw_clients = s.execute(text("SELECT * FROM clients")).mappings().all()
-            raw_contribs = s.execute(text("SELECT * FROM contributions")).mappings().all()
-        else:
-            raw_clients = s.execute(text("SELECT * FROM clients WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
-            raw_contribs = s.execute(text("SELECT * FROM contributions WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
-    
-    # 2. Create the DataFrames
-    clients = pd.DataFrame(raw_clients)
-    contributions = pd.DataFrame(raw_contribs)
-
-    # 3. THE MAGIC ALIASES (This kills the 46 errors)
-    # This makes sure 'clients' AND 'clients_df' both point to the same data.
-    clients_df = clients
-    contributions_df = contributions
-
-except Exception as e:
-    # If the database is empty or errors, we create empty frames so the app doesn't crash
-    clients = clients_df = pd.DataFrame()
-    contributions = contributions_df = pd.DataFrame()
-    st.error(f"Cloud Bridge Syncing... {e}")
-
-# --- END OF INSERTION ---
-# Your existing code (Dashboard, Transactions, etc.) starts below this line....
-
-def sync_to_cloud(new_record):
-    """Strictly saves to Supabase Cloud."""
-    # Ensure the tenant ID is attached for SaaS security
-    new_record['tenant_id'] = st.session_state.get("tenant_id")
-    
-    try:
-        # Save to your Supabase 'contributions' table
-        sb_client.table("contributions").insert(new_record).execute()
-        st.success("✅ Transaction synced to RUCHANET Cloud!")
-        return True
-    except Exception as e:
-        st.error(f"❌ Cloud Sync Error: {e}")
-        return False
-
 def auth_gate():
         if "tenant_id" not in st.session_state:
            st.title("🚀 Welcome to MY SUSU APP: Cloud Portal")
@@ -142,8 +88,61 @@ def auth_gate():
                     st.success("Account created! Please switch to the Login tab.")
         st.stop()
 
+try:
+    sb_client = create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+except Exception as e:
+    st.error(f"Supabase Error: {e}") 
+    st.stop()
 def get_tenant_id():
     return st.session_state.get("tenant_id")
+
+# --- 🧩 THE SAAS BRIDGE (INSERTION) ---
+# This defines the variables your 46 errors are looking for.
+
+tid = st.session_state.get("tenant_id")
+role = st.session_state.get("account_role", "tenant")
+
+# 1. Fetch the data once
+try:
+    with conn.session as s:
+        if role == "developer":
+            raw_clients = s.execute(text("SELECT * FROM clients")).mappings().all()
+            raw_contribs = s.execute(text("SELECT * FROM contributions")).mappings().all()
+        else:
+            raw_clients = s.execute(text("SELECT * FROM clients WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
+            raw_contribs = s.execute(text("SELECT * FROM contributions WHERE tenant_id = :tid"), {"tid": tid}).mappings().all()
+    
+    # 2. Create the DataFrames
+    clients = pd.DataFrame(raw_clients)
+    contributions = pd.DataFrame(raw_contribs)
+
+    # 3. THE MAGIC ALIASES (This kills the 46 errors)
+    # This makes sure 'clients' AND 'clients_df' both point to the same data.
+    clients_df = clients
+    contributions_df = contributions
+
+except Exception as e:
+    # If the database is empty or errors, we create empty frames so the app doesn't crash
+    clients = clients_df = pd.DataFrame()
+    contributions = contributions_df = pd.DataFrame()
+    st.error(f"Cloud Bridge Syncing... {e}")
+
+# --- END OF INSERTION ---
+# Your existing code (Dashboard, Transactions, etc.) starts below this line....
+
+def sync_to_cloud(new_record):
+    """Strictly saves to Supabase Cloud."""
+    # Ensure the tenant ID is attached for SaaS security
+    new_record['tenant_id'] = st.session_state.get("tenant_id")
+    
+    try:
+        # Save to your Supabase 'contributions' table
+        sb_client.table("contributions").insert(new_record).execute()
+        st.success("✅ Transaction synced to RUCHANET Cloud!")
+        return True
+    except Exception as e:
+        st.error(f"❌ Cloud Sync Error: {e}")
+        return False
 
 # --- GLOBAL PWA INJECTION ---
 # Place this right after your imports and set_page_config

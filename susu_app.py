@@ -48,6 +48,15 @@ if "tenant_id" not in st.session_state:
     * ✅ **Automated Sunday Reports** for Managers
     * ✅ **GHS 99.90 / Month** (14-Day Free Trial)
     """)
+    st.markdown("## 🛠️ Powerful Features for Susu Managers")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.info("### ☁️ Cloud Sync\nAccess your data from any phone, anywhere.")
+    with col2:
+        st.success("### 📊 Auto-Reports\nWeekly Sunday reports sent via WhatsApp/Email.")
+    with col3:
+        st.warning("### 🔐 Secure\nBank-grade encryption for all client balances.")
     st.divider()
     
     tab1, tab2 = st.tabs(["🔐 Business Login", "✨ Register Business"])
@@ -74,15 +83,6 @@ if "tenant_id" not in st.session_state:
                     st.rerun()
                 else:
                     st.error("Invalid credentials. Please check your email/password.")
-                    st.markdown("## 🛠️ Powerful Features for Susu Managers")
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.info("### ☁️ Cloud Sync\nAccess your data from any phone, anywhere.")
-                with col2:
-                    st.success("### 📊 Auto-Reports\nWeekly Sunday reports sent via WhatsApp/Email.")
-                with col3:
-                    st.warning("### 🔐 Secure\nBank-grade encryption for all client balances.")
 
     with tab2:
         with st.form("signup_form"):
@@ -99,7 +99,6 @@ if "tenant_id" not in st.session_state:
                     "is_subscribed": False
                 }).execute()
                 st.success("Account created! Please switch to the Login tab.")
-    
     st.stop() # 🛑 Stops the rest of the app until login is successful
 
 try:

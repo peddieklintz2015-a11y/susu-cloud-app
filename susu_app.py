@@ -80,12 +80,11 @@ if "tenant_id" not in st.session_state:
                 # Check if user exists and match the plain password to the cloud hash
                 if res.data and check_password_auth(pwd, res.data[0]['password_hash']):
                     user = res.data[0]
-                    
-                    # --- FIXED BLOCK START ---
                     st.session_state.update({
                         "tenant_id": user['id'],
                         "biz_name": user['business_name'],
-                        "admin_email": user.get('admin_email'), # Important for reports
+                        "admin_email": user.get('admin_email'),
+                        "password_hash": user.get('password_hash'), # <--- ADD THIS LINE
                         "account_role": user.get('account_role', 'tenant'),
                         "role": "Manager" 
                     })
@@ -956,30 +955,36 @@ elif choice == "🛠 Admin Tools":
                         else:
                             st.error("❌ Failed to send email. Check your SMTP settings.")
 
-    # --- TAB 3: DATA CLEANUP & AUDIT (RETAINED) ---
+    # --- TAB 3: DATA CLEANUP & AUDIT ---
     with t3:
         st.subheader("🧹 Database Health & Reversals")
-        admin_entry = st.text_input("Admin Password", type="password")
-        if admin_entry == st.secrets["passwords"]["admin_password"]:
-            if not contributions_df.empty:
-                st.markdown("### ⏪ Quick Undo")
-                recent_data = contributions_df.sort_values(by='date', ascending=False).head(10)
-                id_to_wipe = st.selectbox("Select Transaction ID:", recent_data['id'].tolist())
-                
-                if st.button("🗑️ Delete Entry & Log Audit"):
+        if not contributions_df.empty:
+            st.markdown("### ⏪ Quick Undo")
+            recent_data = contributions_df.sort_values(by='date', ascending=False).head(10)
+            id_to_wipe = st.selectbox("Select Transaction ID:", recent_data['id'].tolist(), key="undo_id")
+            
+            # Request user's own password
+            undo_pwd = st.text_input("Enter YOUR Password to confirm deletion", type="password", key="undo_auth")
+            
+            if st.button("🗑️ Delete Entry & Log Audit", type="secondary"):
+                # Verify against the hash saved in session during login
+                if check_password_auth(undo_pwd, st.session_state.get("password_hash")):
                     try:
                         with conn.session as s:
                             s.execute(text("DELETE FROM contributions WHERE id = :id AND tenant_id = :tid"), {"id": id_to_wipe, "tid": tid})
                             s.execute(text("INSERT INTO audit_logs (action_type, details, tenant_id) VALUES ('MANUAL_DELETE', :d, :tid)"), 
                                       {"d": f"Deleted Trans ID {id_to_wipe}", "tid": tid})
                             s.commit()
-                        st.success("Deleted and Audited.")
+                        st.success("✅ Deleted and Audited.")
                         st.cache_data.clear()
+                        time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
+                else:
+                    st.error("🚫 Incorrect Password. Authorization failed.")
 
-    # --- TAB 4: MANAGE PROFILE (RETAINED) ---
+    # --- TAB 4: MANAGE PROFILE ---
     with t4:
         st.subheader("⚙️ Profile Manager")
         if not clients_df.empty:
@@ -991,16 +996,25 @@ elif choice == "🛠 Admin Tools":
                 st.image(c_data['photo_url'], width=150)
             with col2:
                 st.write(f"*ID:* {c_data['client_id']}")
+                
+                # Password check for deleting a client
+                del_client_pwd = st.text_input(f"Enter Password to delete {target_name}", type="password", key="del_client_auth")
+                
                 if st.button(f"🗑️ Delete {target_name}"):
-                    if st.checkbox("Confirm permanent deletion?"):
-                        with conn.session as s:
-                            s.execute(text("DELETE FROM clients WHERE client_id = :i AND tenant_id = :tid"), 
-                                      {"i": c_data['client_id'], "tid": tid})
-                            s.commit()
-                        st.cache_data.clear()
-                        st.rerun()
+                    if check_password_auth(del_client_pwd, st.session_state.get("password_hash")):
+                        if st.checkbox("Confirm permanent deletion?"):
+                            with conn.session as s:
+                                s.execute(text("DELETE FROM clients WHERE client_id = :i AND tenant_id = :tid"), 
+                                          {"i": c_data['client_id'], "tid": tid})
+                                s.commit()
+                            st.success(f"Profile for {target_name} removed.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.error("🚫 Incorrect Password.")
 
-    # SUPER ADMIN TAB
+    # SUPER ADMIN TAB (Developer only)
     if role == "developer":
         with st.expander("🛡️ DEVELOPER MAINTENANCE"):
             st.write("### 🏢 System-Wide Tenants")
@@ -1010,13 +1024,20 @@ elif choice == "🛠 Admin Tools":
     # --- TAB 5: RESET SYSTEM ---
     with t5:
         st.header("🧨 Factory Reset")
-        if st.checkbox("Delete ALL MY business records permanently?"):
-            reset_pass = st.text_input("Confirm Admin Password", type="password")
-            if st.button("🚨 EXECUTE FULL WIPE"):
-                if reset_pass == st.secrets["passwords"]["admin_password"]:
+        st.warning("This will delete ALL your client records and transactions forever.")
+        
+        if st.checkbox("I understand. Delete all my business records."):
+            reset_pass = st.text_input("Confirm YOUR Account Password", type="password", key="factory_reset_auth")
+            
+            if st.button("🚨 EXECUTE FULL WIPE", type="primary"):
+                if check_password_auth(reset_pass, st.session_state.get("password_hash")):
                     with conn.session as s:
                         s.execute(text("DELETE FROM contributions WHERE tenant_id = :tid"), {"tid": tid})
                         s.execute(text("DELETE FROM clients WHERE tenant_id = :tid"), {"tid": tid})
                         s.commit()
-                    st.success("Wiped.")
+                    st.success("💥 System Reset Successful.")
+                    st.cache_data.clear()
+                    time.sleep(1)
                     st.rerun()
+                else:
+                    st.error("🚫 Authorization Failed: Incorrect Password.")
